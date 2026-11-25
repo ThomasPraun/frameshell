@@ -97,6 +97,15 @@ describe("addAudioBackground against the daemon", () => {
     await editor.undo(dir, "main");
     const restored = (await app.request("timeline.show", { cwd: dir, timeline: "main" })).tracks.find((candidate) => candidate.kind === "video")!.clips;
     expect(restored[0]?.["asset"]).toBe(original["asset"]);
+
+    // An image project's swap: the new picture's own scale, the rest of the placement kept (#751).
+    await replaceClipImage(dir, "main", original.id, picked, {
+      request,
+      apply: (edits, label) => editor.apply(dir, "main", edits, { label }),
+      scaleOf: async (file) => (file === picked ? 0.5 : 1),
+    });
+    const scaled = (await app.request("timeline.show", { cwd: dir, timeline: "main" })).tracks.find((candidate) => candidate.kind === "video")!.clips;
+    expect(scaled[0]?.["transform"]).toMatchObject({ x: 0, y: 0, opacity: 1, scale: 0.5 });
   });
 
   it("refuses a file that is not an image", async () => {

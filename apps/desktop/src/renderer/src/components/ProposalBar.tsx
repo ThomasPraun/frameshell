@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { authorOf } from "../history/model.js";
+import { authorOf, labelText } from "../history/model.js";
 import { t } from "../i18n.js";
 import { type ConfigLine, type ReviewSide, type StyleLine, barOf, configLines, requirementLines, styleLines, whoOf } from "../review/model.js";
 import { decide, dismissStaleNotice, showSide, useReview } from "../review/store.js";
@@ -19,7 +19,7 @@ export function ProposalBar() {
     const { notice } = bar;
     return (
       <div className="proposal-bar is-stale" role="alert" aria-label={t.review.barLabel} data-state="stale" data-tx={notice.tx}>
-        <span className="proposal-title">{notice.label ?? t.review.untitled}</span>
+        <span className="proposal-title">{notice.label ? labelText(notice.label) : t.review.untitled}</span>
         <span className="proposal-status">{t.review.stale}</span>
         {notice.conflicts.length > 0 && <span className="proposal-ids">{t.review.staleIds(notice.conflicts.join(" "))}</span>}
         <span className="proposal-note">{t.review.staleAdvice}</span>
@@ -35,7 +35,7 @@ export function ProposalBar() {
   const run = (decision: "accept" | "reject") => async () => setFailure(await decide(proposal.tx, decision));
   return (
     <div className="proposal-bar" role="region" aria-label={t.review.barLabel} data-state={bar.kind} data-side={side} data-tx={proposal.tx}>
-      <span className="proposal-title">{proposal.label ?? t.review.untitled}</span>
+      <span className="proposal-title">{proposal.label ? labelText(proposal.label) : t.review.untitled}</span>
       <span className="proposal-who" title={author.detail ? `${author.name} ${author.detail}` : proposal.author}>
         {bar.kind === "building" ? t.review.building(whoOf(proposal.author)) : t.review.ready(whoOf(proposal.author))}
       </span>

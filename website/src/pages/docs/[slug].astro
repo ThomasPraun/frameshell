@@ -1,0 +1,10 @@
+---
+import DocsPage from "../../components/DocsPage.astro";
+import { docsFor } from "../../docs";
+
+export async function getStaticPaths() {
+  return (await docsFor("en")).map(({ slug }) => ({ params: { slug } }));
+}
+---
+
+<DocsPage slug={Astro.params.slug} />

@@ -9,6 +9,7 @@ import {
   clock,
   confirmedBy,
   faceViewBox,
+  fileLabel,
   linkChoices,
   personColour,
   speakerName,
@@ -28,8 +29,11 @@ import type { TranscriptSource } from "../transcript/model.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 
 
-/** Transcript file as a person reads it: without its folder. */
-const fileName = (path: string) => path.replace(/^transcripts\//, "");
+/** A transcript, asset or script as a person reads it: its name, and when it was recorded for a take. */
+const fileName = (path: string) => {
+  const { name, recorded } = fileLabel(path);
+  return recorded ? t.people.recording(name, recorded) : name;
+};
 
 /**
  * People (ADR 0020): who is who across transcripts, angles and faces. Suggestions Frameshell found wait for a
@@ -48,7 +52,13 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [name, setName] = useState("");
   const list = people.snapshot.people;
-  const choices = useMemo(() => linkChoices(sources, view, list), [sources, view, list]);
+  const choices = useMemo(() => linkChoices(sources, view, list, fileName), [sources, view, list]);
+  // With nobody in People yet, the voices transcripts already name are offered as people (#753).
+  const voices = choices.flatMap((choice) =>
+    "speaker" in choice.target && choice.target.speaker.speaker !== undefined
+      ? [{ key: choice.key, name: choice.label, transcript: choice.target.speaker.transcript, speaker: choice.target.speaker.speaker, target: choice.target }]
+      : [],
+  );
   const totals = usePersonTotals(list, view?.revision ?? null, sources);
   useEffect(() => stopVoice, []);
 
@@ -138,7 +148,15 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
         </button>
       </form>
       <div className="people-scan">
-        <button className="button" onClick={() => run(peopleActions.scan())} disabled={people.scan.running} data-testid="people-scan">
+        <button
+          className="button"
+          onClick={() => {
+            setNotice(null);
+            peopleActions.scan().then((faces) => {
+              if (faces === 0) setNotice({ tone: "info", text: t.people.noNewFaces });
+            }, fail);
+          }}
+          disabled={people.scan.running} data-testid="people-scan">
           {t.people.scan}
         </button>
         {people.scan.running && (
@@ -147,7 +165,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
           </span>
         )}
         {people.scan.error && (
-          <span className="people-scan-state people-error" role="alert">
+          <span className="people-scan-state people-error" role="alert" data-testid="people-scan-error">
             {t.people.scanFailed(people.scan.error)}
           </span>
         )}
@@ -182,7 +200,33 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
         </section>
       )}
 
-      {people.status === "ready" && list.length === 0 && <p className="empty">{t.people.empty}</p>}
+      {people.status === "ready" && list.length === 0 && voices.length === 0 && <p className="empty">{t.people.empty}</p>}
+      {people.status === "ready" && list.length === 0 && voices.length > 0 && (
+        <section aria-label={t.people.voicesFound} data-testid="people-voices">
+          <h3 className="people-heading">{t.people.voicesFound}</h3>
+          <p className="people-notice">{t.people.voicesFoundHint}</p>
+          <ul className="people-list">
+            {voices.map((choice) => {
+              const label = t.people.voice(choice.name, fileName(choice.transcript));
+              return (
+                <li key={choice.key} className="suggestion" data-testid="people-voice">
+                  <div className="suggestion-body">
+                    <p className="suggestion-text">
+                      {label}
+                      <VoicePlay transcript={choice.transcript} speaker={choice.speaker} label={label} sources={sources} assets={assets} mediaUrl={mediaUrl} onFailed={fail} />
+                    </p>
+                    <div className="suggestion-actions">
+                      <button className="button" data-testid="people-voice-add" data-tip={t.people.addVoiceHint(choice.name)} onClick={() => run(peopleActions.addWith(choice.name, choice.target))}>
+                        {t.people.addVoice}
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <ul className="people-list" data-testid="people-list">
         {list.map((person) => {
           const isPicked = selected?.id === person.id;
@@ -300,7 +344,7 @@ export function PeoplePanel({ mediaUrl }: { mediaUrl: string }) {
                 {person.faces.map((link) => (
                   <LinkChip
                     key={`${link.asset}:${link.at}:${link.x}:${link.y}`}
-                    label={t.people.face(link.asset.replace(/^assets\//, ""), clock(link.at))}
+                    label={t.people.face(fileName(link.asset), clock(link.at))}
                     link={link}
                     kind="face"
                     onUnlink={() => run(peopleActions.unlink(person.id, { face: { asset: link.asset, at: link.at, x: link.x, y: link.y } }))}

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import * as pty from "node-pty";
 import { agentCommands, agentOfCommand } from "@frameshell/protocol";
-import { foregroundCommand } from "./agent-detect.js";
+import { WindowsProcessTable, descendantCommands, foregroundCommand } from "./agent-detect.js";
 import { OutputRing, type OutputRingLimits } from "./output-ring.js";
 import type { TerminalLaunch } from "./terminal-launch.js";
 
@@ -20,10 +20,15 @@ export interface TerminalEvents {
 
 /** Options for {@link TerminalManager}. */
 export interface TerminalManagerOptions {
-  /** Agent label of a shell's foreground command, or null. Default: `ps` + {@link agentOfCommand}; none on Windows. */
+  /** Agent label of a shell's foreground command, or null. Default: `ps` + {@link agentOfCommand}; on Windows the commands under the shell. */
   detectAgent?: ((shellPid: number) => Promise<string | null>) | null;
   /** How often to look at each terminal's foreground, ms. */
   agentPollMs?: number;
+  /**
+   * Call `detectAgent` on every poll instead of only when node-pty's foreground name changed. Default: on Windows,
+   * where that name stays the shell's.
+   */
+  probeEveryPoll?: boolean;
   /** Output kept per terminal for {@link TerminalManager.attach}. Default: about 10,000 lines, 4 MiB. */
   outputLimits?: OutputRingLimits;
 }
@@ -32,11 +37,18 @@ export interface TerminalManagerOptions {
 const FLUSH_MS = 5;
 /** Agents take seconds before their first command: a second's lag in noticing one is harmless. */
 const AGENT_POLL_MS = 1000;
+/** On Windows each poll reads the process table (one shared query), so it looks less often. */
+const WINDOWS_POLL_MS = 2000;
 /**
  * A foreground found not to be an agent is looked at again for this long: Node CLIs
  * (Claude Code, Codex, ...) show as `node` until they set their process title.
  */
 const TITLE_SETTLE_MS = 5000;
+/**
+ * How long a killed shell has to exit after the hang-up before it gets SIGKILL (not Windows). Bash can catch the
+ * hang-up while readline is finishing a line and go back to its prompt, so the tab would never close.
+ */
+const KILL_GRACE_MS = 2000;
 /** Longest {@link TerminalManager.killAll} waits for shells to exit: quitting must not hang on one. */
 const EXIT_WAIT_MS = 5000;
 
@@ -75,10 +87,25 @@ interface Entry {
   probing: boolean;
 }
 
-/** Detection from `ps` on Unix; Windows has no foreground process groups to read. */
+/** One process table for every window's terminals on Windows. */
+let windowsTable: WindowsProcessTable | undefined;
+
+/**
+ * Detection from `ps` on Unix. Windows has no foreground process groups to read: there the first agent among the
+ * commands under the shell is it (ADR 0048).
+ */
 function defaultDetect(): ((shellPid: number) => Promise<string | null>) | null {
-  if (process.platform === "win32") return null;
   const commands = agentCommands(process.env);
+  if (process.platform === "win32") {
+    return async (shellPid) => {
+      windowsTable ??= new WindowsProcessTable();
+      for (const argv of descendantCommands(await windowsTable.snapshot(), shellPid)) {
+        const agent = agentOfCommand(argv, commands);
+        if (agent) return agent;
+      }
+      return null;
+    };
+  }
   return async (shellPid) => {
     const argv = await foregroundCommand(shellPid);
     return argv ? agentOfCommand(argv, commands) : null;
@@ -95,8 +122,12 @@ export class TerminalManager {
   readonly #terminals = new Map<string, Entry>();
   /** Recent output per terminal, kept after its shell exits until the terminal is killed. */
   readonly #output = new Map<string, OutputRing>();
+  /** What a view needs to show each terminal not killed yet, in creation order: {@link TerminalManager.list}. */
+  readonly #listed = new Map<string, { session: string; shell: string; exitCode: number | null }>();
   readonly #detect: ((shellPid: number) => Promise<string | null>) | null;
   readonly #pollMs: number;
+  /** Look up the agent on every poll: node-pty's foreground name is the shell's for good on Windows. */
+  readonly #probeEveryPoll: boolean;
   readonly #outputLimits: OutputRingLimits | undefined;
 
   constructor(
@@ -104,7 +135,9 @@ export class TerminalManager {
     options: TerminalManagerOptions = {},
   ) {
     this.#detect = options.detectAgent === undefined ? defaultDetect() : options.detectAgent;
-    this.#pollMs = options.agentPollMs ?? AGENT_POLL_MS;
+    const windows = process.platform === "win32";
+    this.#pollMs = options.agentPollMs ?? (windows ? WINDOWS_POLL_MS : AGENT_POLL_MS);
+    this.#probeEveryPoll = options.probeEveryPoll ?? windows;
     this.#outputLimits = options.outputLimits;
   }
 
@@ -149,6 +182,8 @@ export class TerminalManager {
     });
     proc.onExit(({ exitCode }) => {
       markExited();
+      const listed = this.#listed.get(id);
+      if (listed) listed.exitCode = exitCode;
       entry.flush();
       this.#terminals.delete(id);
       this.#stopWatching(id, entry);
@@ -156,8 +191,18 @@ export class TerminalManager {
     });
     this.#terminals.set(id, entry);
     this.#output.set(id, output);
+    this.#listed.set(id, { session: entry.session ?? "", shell, exitCode: null });
     if (this.#detect) entry.poll = setInterval(() => void this.#watch(id, entry), this.#pollMs);
     return { id, shell };
+  }
+
+  /**
+   * Terminals not killed yet, oldest first: running ones, and exited ones whose output is still kept. A reloaded
+   * window (a language change, Ctrl+R) shows them again instead of starting new shells, so an agent running in one
+   * goes on (ADR 0012).
+   */
+  list(): { id: string; session: string; shell: string; exitCode: number | null; agent: string | null }[] {
+    return [...this.#listed].map(([id, listed]) => ({ id, ...listed, agent: this.#terminals.get(id)?.agent ?? null }));
   }
 
   /** Sessions whose terminal runs an agent now, with its label: to tag them again in a restarted daemon. */
@@ -168,6 +213,16 @@ export class TerminalManager {
   /** Look up the agent when the foreground changed, and while it settles; `ps` runs only then, not every poll. */
   async #watch(id: string, entry: Entry): Promise<void> {
     if (entry.probing || !this.#detect) return;
+    if (this.#probeEveryPoll) {
+      entry.probing = true;
+      try {
+        const agent = await this.#detect(entry.pty.pid);
+        if (this.#terminals.get(id) === entry) this.#setAgent(id, entry, agent);
+      } finally {
+        entry.probing = false;
+      }
+      return;
+    }
     let name: string;
     try {
       name = basename(entry.pty.process ?? "").replace(/^-/, "");
@@ -255,6 +310,7 @@ export class TerminalManager {
   async killAll(): Promise<void> {
     const exits = [...this.#terminals.keys()].map((id) => this.#kill(id));
     this.#output.clear();
+    this.#listed.clear();
     let timer: NodeJS.Timeout | undefined;
     const bound = new Promise<void>((resolve) => (timer = setTimeout(resolve, EXIT_WAIT_MS)));
     await Promise.race([Promise.all(exits), bound]);
@@ -264,6 +320,7 @@ export class TerminalManager {
   /** Settles when the shell has exited; at once when unknown or already gone. An exited shell is not killed again. */
   #kill(id: string): Promise<void> {
     this.#output.delete(id);
+    this.#listed.delete(id);
     const entry = this.#terminals.get(id);
     if (!entry) return Promise.resolve();
     this.#terminals.delete(id);
@@ -275,6 +332,17 @@ export class TerminalManager {
     } catch {
       // Already gone.
       return Promise.resolve();
+    }
+    if (process.platform !== "win32") {
+      const pty = entry.pty;
+      const force = setTimeout(() => {
+        try {
+          if (processExists(pty.pid)) pty.kill("SIGKILL");
+        } catch {
+          // Gone meanwhile.
+        }
+      }, KILL_GRACE_MS);
+      void entry.exited.then(() => clearTimeout(force));
     }
     return entry.exited;
   }

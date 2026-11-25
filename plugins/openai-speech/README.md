@@ -18,9 +18,11 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 ## The key
 
-The key is read from the **`OPENAI_API_KEY` environment variable** at every call. It is never written to a project file, the history, a progress message or an error, and error texts from OpenAI are scrubbed of anything that looks like a key before they are shown.
+In the app, the easiest way is the **Plugins** view: paste the key in the field under the plugin and Save. The app encrypts it with your system's keychain (Windows DPAPI, the macOS Keychain, the Linux Secret Service), keeps it only in its settings folder, and hands it to the Frameshell daemon in memory while the app is open (ADR 0050). The CLI in the app's terminals uses it too. A key in the environment variable below wins over a saved one.
 
-The variable must exist in the environment the Frameshell **daemon** was started from. The CLI starts the daemon on demand with the environment of the shell that ran it, and the app starts it with the app's own environment. A running daemon keeps the environment it started with (it exits about 5 minutes after its last client leaves), so after setting the variable close Frameshell and the terminals using it, wait for the daemon to end (or log out and in), and open it again. An app opened from the Dock, Finder, Start menu or a shortcut does **not** see variables set in `~/.zshrc` or `~/.bashrc`:
+The plugin reads the key from the **`OPENAI_API_KEY` environment variable** of the daemon at every call. It is never written to a project file, the history, a progress message or an error, and error texts from OpenAI are scrubbed of anything that looks like a key before they are shown.
+
+Without the app (CLI only), the variable must exist in the environment the Frameshell **daemon** was started from. The CLI starts the daemon on demand with the environment of the shell that ran it, and the app starts it with the app's own environment. A running daemon keeps the environment it started with (it exits about 5 minutes after its last client leaves), so after setting the variable close Frameshell and the terminals using it, wait for the daemon to end (or log out and in), and open it again. An app opened from the Dock, Finder, Start menu or a shortcut does **not** see variables set in `~/.zshrc` or `~/.bashrc`:
 
 - **macOS:** run `launchctl setenv OPENAI_API_KEY <key>` and open Frameshell again, or use the CLI from a terminal where the variable is exported. `launchctl setenv` lasts until you log out.
 - **Windows:** set it once for your user with `setx OPENAI_API_KEY <key>` (or System Properties, Environment Variables); programs started afterwards see it.

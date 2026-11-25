@@ -3,6 +3,7 @@ import { type Transcript, parseTranscript } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import {
   buildTranscriptModel,
+  cutPlan,
   isKept,
   paragraphs,
   placeWord,
@@ -284,6 +285,33 @@ describe("restorePlan", () => {
     });
     // The own track always moves, even where it would open a gap; the voice track is held from the music.
     expect(rippleScope(voice, "a_music", 2)).toEqual({ tracks: ["a_music", "a_fx", "v_broll"], held: ["v1"] });
+  });
+});
+
+describe("cutPlan (#741)", () => {
+  const whole = view([media("c_a", 0, 0, 6)]);
+
+  it("cuts selected words as one range, its edges mid-gap to the neighbours, without moving them into pauses", () => {
+    const plan = cutPlan(buildTranscriptModel(whole, sources), [key("w_000002"), key("w_000003")]);
+    expect(plan).toEqual({ edits: [{ op: "cut", args: { from: 0.95, to: 2.15, snap: false } }], keys: [key("w_000002"), key("w_000003")] });
+  });
+
+  it("cuts words apart on the timeline as separate ranges, latest first, and uses a word's own edge with no neighbour", () => {
+    const plan = cutPlan(buildTranscriptModel(whole, sources), [key("w_000001"), key("w_000008")]);
+    expect(plan!.edits).toEqual([
+      { op: "cut", args: { from: 4.7, to: 5.3, snap: false } },
+      { op: "cut", args: { from: 0.5, to: 0.95, snap: false } },
+    ]);
+  });
+
+  it("joins words that already play next to each other across an earlier cut, and skips struck words", () => {
+    // "todos" ends clip c_a, "a" opens c_b: nothing plays between them since "hoy vamos" was cut.
+    const plan = cutPlan(buildTranscriptModel(cutView, sources), [key("w_000003"), key("w_000004"), key("w_000006")]);
+    expect(plan).toEqual({ edits: [{ op: "cut", args: { from: 1.25, to: 2.2, snap: false } }], keys: [key("w_000003"), key("w_000006")] });
+  });
+
+  it("is null when no key names a kept word", () => {
+    expect(cutPlan(buildTranscriptModel(cutView, sources), [key("w_000004"), "nope#w_1"])).toBeNull();
   });
 });
 

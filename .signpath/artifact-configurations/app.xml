@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "app" (ADR 0051, docs/release.md "Windows signing").
+  Kept here so it is reviewed like code; paste it into the SignPath project (slug: app) after a change.
+  The artifact is release/win-unpacked zipped by actions/upload-artifact, so Frameshell.exe sits at the root.
+  productVersion comes from the workflow: the app's own ProductVersion, which the installer must share.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="productVersion" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Frameshell.exe" product-name="Frameshell" product-version="${productVersion}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

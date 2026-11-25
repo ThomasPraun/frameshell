@@ -4,15 +4,19 @@ import { strings, pathFor, type Lang, type Page } from "../i18n";
 
 interface Props {
   page?: Page;
+  /** Docs page slug, for the canonical and alternate links. */
+  slug?: string;
+  /** Title and description of a page whose strings are not in the dictionary (a docs page). */
+  meta?: { title: string; description: string };
 }
-const { page = "home" } = Astro.props;
+const { page = "home", slug } = Astro.props;
 const lang = (Astro.currentLocale ?? "en") as Lang;
 const t = strings(lang);
-const meta = page === "agents" ? t.agents.meta : t.meta;
-const canonical = new URL(pathFor(lang, page), Astro.site);
+const meta = Astro.props.meta ?? (page === "agents" ? t.agents.meta : page === "docs" ? t.docs.meta : t.meta);
+const canonical = new URL(pathFor(lang, page, slug), Astro.site);
 // English pages only: a first visit with a Spanish browser goes to the /es/ twin; a choice made with
 // the header's language switch (localStorage "lang") wins after that.
-const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(pathFor(l, page), Astro.site) }));
+const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(pathFor(l, page, slug), Astro.site) }));
 ---
 
 <!doctype html>
@@ -34,7 +38,7 @@ const alternates = (["en", "es"] as const).map((l) => ({ lang: l, href: new URL(
     <meta name="description" content={meta.description} />
     <link rel="canonical" href={canonical} />
     {alternates.map((a) => <link rel="alternate" hreflang={a.lang} href={a.href} />)}
-    <link rel="alternate" hreflang="x-default" href={new URL(pathFor("en", page), Astro.site)} />
+    <link rel="alternate" hreflang="x-default" href={new URL(pathFor("en", page, slug), Astro.site)} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#141517" />

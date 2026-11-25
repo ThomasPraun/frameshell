@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { layer } from "../analyze/card.js";
+import { REVIEW_CARD_FILE, REVIEW_LAYER_HOLDS, reviewCardMarkdown } from "./card.js";
 import { join } from "node:path";
 import {
   ErrorCode,
@@ -493,7 +495,7 @@ export class ReviewService {
         await writeFile(join(dir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
       }
 
-      const result: ReviewResult = {
+      const reviewed: Omit<ReviewResult, "card" | "layers"> = {
         view: viewed.view,
         proposal: viewed.proposal,
         source: request.file ? "file" : "timeline",
@@ -511,10 +513,17 @@ export class ReviewService {
         metrics,
         warnings,
       };
-      const { view: _view, proposal: _proposal, metrics: _metrics, ...manifest } = result;
-      await writeFile(join(dir, "review.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+      const { view: _view, proposal: _proposal, metrics: _metrics, ...manifest } = reviewed;
+      const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+      await writeFile(join(dir, "review.json"), manifestText);
+      // The card first, then the layers smallest first (#801): an agent reads 300 tokens before it opens anything.
+      const layers = [layer("review.json", Buffer.byteLength(manifestText), REVIEW_LAYER_HOLDS.review)];
+      if (metrics) layers.push(layer("metrics.json", Buffer.byteLength(`${JSON.stringify(metrics, null, 2)}\n`), REVIEW_LAYER_HOLDS.metrics));
+      layers.sort((a, b) => a.bytes - b.bytes);
+      const card = reviewCardMarkdown(reviewed, layers);
+      await writeFile(join(dir, REVIEW_CARD_FILE), card);
       await this.#prune(root);
-      return result;
+      return { ...reviewed, card, layers };
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }
