@@ -29,7 +29,8 @@ interface TierSettings {
 }
 
 /**
- * Master and preview numbers are the measured ones. Draft has none of its own: x264 is the
+ * Master and preview numbers are starting points from the encoder spec, not measured in this repo:
+ * no measurement of quality or size per tier exists yet. Draft has none of its own: x264 is the
  * CRF 22 veryfast, NVENC and VideoToolbox sit between preview and master (review rounds read the
  * picture, not the grain). Final is the master quality with the slowest x264 preset.
  */

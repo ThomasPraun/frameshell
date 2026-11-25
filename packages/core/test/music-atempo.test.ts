@@ -4,7 +4,7 @@ import { MUSIC_FIT_MAX_VARISPEED } from "@frameshell/protocol";
 import { mediaTools } from "./media-tools.js";
 
 // The check ADR 0037 asks for: how the export's varispeed (`atempo`, pitch kept) treats percussive music at the
-// largest change `music.fit` allows (±1.7 %), against a tape-style resample. The signal is 24 s at
+// largest change `music.fit` allows (±1.7 %), against a tape-style resample (measured, not planned: ADR 0037). The signal is 24 s at
 // 120 BPM: a 60 Hz kick (80 ms decay) every beat, noise snares on the backbeat, 8 ms noise hats between. Numbers
 // measured on ffmpeg 9.0.2 are in docs/adr/0037; the bounds here are loose so another build passes, tight enough that
 // an atempo which smears or drifts audibly fails.

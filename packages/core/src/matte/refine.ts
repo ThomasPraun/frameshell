@@ -10,7 +10,7 @@ export interface PlaneSize {
   height: number;
 }
 
-/** Radius, in frame pixels, of the guided filter's window (the recipe: r 8 at 540p). */
+/** Radius, in frame pixels, of the guided filter's window (ADR 0032's recipe: r 8 at 540p). */
 export const GUIDED_RADIUS = 8;
 /** Regularization of the guided filter on 0..1 values: lower follows the guide's edges more closely. */
 export const GUIDED_EPS = 2e-3;
@@ -153,7 +153,7 @@ export function guidedScale(size: PlaneSize): number {
   return Math.max(1, Math.min(size.width, size.height) / GUIDED_REFERENCE_SHORT_SIDE);
 }
 
-/** Guided filter settings; the defaults are the recipe scaled to the frame by {@link guidedScale}. */
+/** Guided filter settings; the defaults are ADR 0032's recipe scaled to the frame by {@link guidedScale}. */
 export interface GuidedOptions {
   /** Window radius, pixels of the frame. */
   radius?: number;
@@ -360,7 +360,7 @@ function applyRgbCoefficients(coefficients: RgbCoefficients, rgb: Uint8Array, si
   }
 }
 
-/** `(v - 0.5) * gain + 0.5`, clamped to 0..1: the recipe's contrast step. */
+/** `(v - 0.5) * gain + 0.5`, clamped to 0..1: ADR 0032's contrast step. */
 export function contrast(value: number, gain = CONTRAST_GAIN): number {
   return Math.min(1, Math.max(0, (value - 0.5) * gain + 0.5));
 }

@@ -2,7 +2,8 @@ import type { SfxKind } from "@frameshell/schema";
 
 // The numbers `review` judges a film by, as data. Ported from HyperFrames' `check` and
 // `measure` (Apache-2.0, https://github.com/heygen-com/hyperframes) and from the ranges the owner measured on seven launch
-// films with earshot; every one is a judgment with a number, so each is a warning, never a failure.
+// films with earshot; every one is a judgment with a number, so each is a warning, never a failure. The source of
+// each number: `docs/research/review-thresholds.md`.
 
 /** Seconds a visual event may sit from a sound to count as the one it belongs to. */
 export const SYNC_MATCH_S = 0.12;
