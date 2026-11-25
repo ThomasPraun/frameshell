@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Lean in (owner decision Q3): a headline or quote card that slides in
+ * Lean in (owner decision, ADR 0033): a headline or quote card that slides in
  * from a side with a heavy spring, tilts away as it comes and leans back toward
  * the viewer, then holds with a slow lean (scale 1 to 1.06, rotation 1 to 2
  * degrees). 2D scale and rotation only (ADR 0033: no 3D transform), no matte.

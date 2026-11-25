@@ -12,7 +12,7 @@ import { syncWarnings } from "./sync.js";
 
 // The numbers of `review`: what a picture sheet cannot tell. Pure: a motion series and cues in, metrics out.
 // Thresholds are the owner's launch-film checklist (the HyperFrames `check` and earshot ranges it
-// cites); they are judgments with a number, so every one is a warning, never a failure. Still pictures, big changes
+// cites; sources in `docs/research/review-thresholds.md`); they are judgments with a number, so every one is a warning, never a failure. Still pictures, big changes
 // and bursts are `analyze`'s (`analyze/rhythm.ts`): one scale for a reference and our film. On a sampled
 // series every threshold applies per sample interval, as if each sample were a frame.
 
