@@ -35,7 +35,8 @@ export type LaunchNote =
 
 /** What a card shows. */
 export interface CardView {
-  kind: "loading" | "working" | "unavailable" | "not-installed" | "ready" | "different" | "connected";
+  /** `no-settings`: Open found and started the app, but its settings folder is still missing (#735). */
+  kind: "loading" | "working" | "unavailable" | "not-installed" | "no-settings" | "ready" | "different" | "connected";
   /**
    * The Open button (desktop cards only). Shown once connected; and when the app looks not installed, because the
    * settings folder it is judged by only exists after the app ran once, so Open can still work.
@@ -83,6 +84,8 @@ export function cardView(status: AiAppStatus | undefined, working: boolean, last
   const missing = launch?.kind === "not-found";
   if (status.connected) return { kind: "connected", open: true, download: missing, connect: null, disconnect: true, ...after };
   if (status.different) return { kind: "different", open: false, download: false, connect: "again", disconnect: true, ...after };
+  // Open found the app, so the card never says it is not installed (#735); Check again reads the settings once it has started.
+  if (!status.installed && launch?.kind === "opened") return { kind: "no-settings", open: true, download: false, connect: null, disconnect: false, ...after, checkAgain: true };
   if (!status.installed) return { kind: "not-installed", open: true, download: true, connect: null, disconnect: false, ...after, checkAgain: true };
   return { kind: "ready", open: false, download: false, connect: "connect", disconnect: false, ...after };
 }

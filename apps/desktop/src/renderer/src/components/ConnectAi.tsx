@@ -119,6 +119,7 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
       {text.note && <p className="connect-ai-hint">{text.note}</p>}
       {view.kind === "unavailable" && <p className="connect-ai-hint">{said.notAvailable}</p>}
       {view.kind === "not-installed" && <p className="connect-ai-hint">{said.notInstalled(text.name)}</p>}
+      {view.kind === "no-settings" && <p className="connect-ai-hint">{said.noSettings(text.name)}</p>}
       {view.kind === "different" && <p className="connect-ai-hint">{said.different}</p>}
       {view.restart && (
         <p className="connect-ai-done" role="status" data-testid="connect-ai-restart">
