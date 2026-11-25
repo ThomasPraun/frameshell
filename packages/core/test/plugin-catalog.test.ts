@@ -18,7 +18,7 @@ const savedKey = process.env.OPENAI_API_KEY;
 beforeEach(async () => {
   // standardPaths off: the machine's own Blender must not be seen.
   binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), standardPaths: false });
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), binaries });
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), binaries, dirs: { dataDir: tempDir(), configDir: tempDir() } });
   conn = await connectToDaemon(daemon.socketPath, { client: "test" });
   dir = tempDir();
   await conn.request("project.init", { dir });
@@ -69,6 +69,31 @@ describe("plugin.catalog", () => {
     const whisper = (await conn.request("plugin.catalog", { cwd: dir })).plugins.find((plugin) => plugin.name === "@frameshell/whisper-cpp")!;
     expect(whisper.downloads[1]).toMatchObject({ id: "ggml-large-v3-turbo-q5_0", onDisk: true });
     expect(whisper.downloadBytes).toBe(whisper.downloads[0]!.bytes ?? 0);
+  });
+
+  it("lists the model the project transcribes with, not only the plugin's default", async () => {
+    const model = async () => (await conn.request("plugin.catalog", { cwd: dir })).plugins.find((plugin) => plugin.name === "@frameshell/whisper-cpp")!.downloads[1]!;
+    const q8 = await binaries.locateModel("ggml-large-v3-turbo-q8_0");
+    patchConfig({ transcription: { provider: "whisper-cpp", model: "large-v3-turbo-q8_0" } });
+    expect(await model()).toMatchObject({ kind: "model", id: "ggml-large-v3-turbo-q8_0", bytes: q8.pinned.size, onDisk: false });
+
+    patchConfig({ transcription: { provider: "whisper-cpp" } });
+    await conn.request("model.default", { provider: "whisper-cpp", model: "large-v3-turbo-q8_0" });
+    expect((await model()).id).toBe("ggml-large-v3-turbo-q8_0");
+
+    const file = join(tempDir(), "ggml-mine.bin");
+    writeFileSync(file, "lmggmine");
+    await conn.request("model.add", { id: "mine", file });
+    patchConfig({ transcription: { provider: "whisper-cpp", model: "mine" } });
+    const whisper = (await conn.request("plugin.catalog", { cwd: dir })).plugins.find((plugin) => plugin.name === "@frameshell/whisper-cpp")!;
+    expect(whisper.downloads[1]).toMatchObject({ id: "mine", bytes: null, onDisk: true });
+    expect(whisper.downloadBytes).toBe(whisper.downloads[0]!.bytes ?? 0);
+  });
+
+  it("keeps the plugin's default model when the project uses another provider", async () => {
+    patchConfig({ transcription: { provider: "openai", model: "whisper-1" } });
+    const whisper = (await conn.request("plugin.catalog", { cwd: dir })).plugins.find((plugin) => plugin.name === "@frameshell/whisper-cpp")!;
+    expect(whisper.downloads[1]!.id).toBe("ggml-large-v3-turbo-q5_0");
   });
 
   it("says whether an OpenAI key is set without returning it", async () => {

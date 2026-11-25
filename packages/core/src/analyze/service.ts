@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { CARD_FILE, LAYER_HOLDS, SHOTS_FILE, cardMarkdown, layer, shotsMarkdown } from "./card.js";
 import { basename, extname, join } from "node:path";
 import { ANALYSIS_DIR, ANALYSIS_MANIFEST, ANALYZE_RESULT_LABELS, type AnalyzeAudio, type AnalyzeDiffResultShape, type AnalyzeEvent, type AnalyzeResultShape, type AnalyzeSheet, type AnalyzeShotLook, ErrorCode, RpcError } from "@frameshell/protocol";
 import { effectiveBeatGrid, isLowConfidence } from "@frameshell/schema";
@@ -243,7 +244,7 @@ export class AnalyzeService {
     const lookOf = (builder: LookBuilder, shot: number) => builder.look() ?? fallbackLook(looks, shot, overallLook);
     const wholeLook = overallLook.look()!; // The picture pass read at least one frame.
     const stats = shotStats(shots, fps);
-    const result: AnalyzeResultShape = {
+    const measured: Omit<AnalyzeResultShape, "card" | "layers"> = {
       file: request.file,
       name,
       dir,
@@ -283,10 +284,17 @@ export class AnalyzeService {
       warnings,
       labels: { ...ANALYZE_RESULT_LABELS },
     };
-    const manifest = { ...result, shots: result.shots.map((shot, i) => ({ ...shot, look: lookOf(looks[i]!, i) })), tempo: tempo ?? null };
-    await writeFile(join(dir, ANALYSIS_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+    const manifest = { ...measured, shots: measured.shots.map((shot, i) => ({ ...shot, look: lookOf(looks[i]!, i) })), tempo: tempo ?? null };
+    const full = `${JSON.stringify(manifest, null, 2)}\n`;
+    const shotsText = shotsMarkdown(measured);
+    await writeFile(join(dir, ANALYSIS_MANIFEST), full);
+    await writeFile(join(dir, SHOTS_FILE), shotsText);
+    // The layers after the card, smallest first (#801): an agent reads the card, then only what it needs.
+    const layers = [layer(SHOTS_FILE, Buffer.byteLength(shotsText), LAYER_HOLDS.shots), layer(ANALYSIS_MANIFEST, Buffer.byteLength(full), LAYER_HOLDS.full)];
+    const card = cardMarkdown(measured, layers);
+    await writeFile(join(dir, CARD_FILE), card);
     hooks.progress?.(1);
-    return result;
+    return { ...measured, card, layers };
   }
 
   /**

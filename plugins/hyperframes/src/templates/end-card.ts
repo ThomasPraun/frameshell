@@ -111,18 +111,32 @@ export const endCard: Template = {
       var lift = unit * 0.035;
       var CTA = 0.55;  // when the button springs in; the underline follows
 
+      // The slow push scales the card about its centre. It is folded into each line's own pose instead of a transform
+      // on #content: Chrome keeps the raster of a child whose own transform did not change under an ancestor that
+      // scaled, so a reseek would paint the button at the scale of an earlier frame (#808).
+      function pushed(el, pose, k) {
+        var dx = el.offsetLeft + el.offsetWidth / 2 - content.clientWidth / 2;
+        var dy = el.offsetTop + el.offsetHeight / 2 - content.clientHeight / 2;
+        return {
+          x: (pose.x || 0) * k + dx * (k - 1),
+          y: (pose.y || 0) * k + dy * (k - 1),
+          scale: (pose.scale === undefined ? 1 : pose.scale) * k,
+          opacity: pose.opacity,
+        };
+      }
+
       M.bind("${id}", function (t) {
         M.write(bg, { opacity: M.ease("enter", t / 0.3) });
         // Holds never stop: the card pushes in slowly over its whole length.
-        M.write(content, { scale: 1 + P.push * Math.min(1, t / D) });
+        var k = 1 + P.push * Math.min(1, t / D);
         var s = M.spring("heavy", t - 0.1);
-        M.write(logo, { y: (1 - s) * lift, scale: 0.6 + 0.4 * s, opacity: M.ease("enter", (t - 0.1) / 0.3) });
+        M.write(logo, pushed(logo, { y: (1 - s) * lift, scale: 0.6 + 0.4 * s, opacity: M.ease("enter", (t - 0.1) / 0.3) }, k));
         s = M.spring("heavy", t - 0.25);
-        M.write(title, { y: (1 - s) * lift, opacity: M.ease("enter", (t - 0.25) / 0.3) });
+        M.write(title, pushed(title, { y: (1 - s) * lift, opacity: M.ease("enter", (t - 0.25) / 0.3) }, k));
         s = M.spring("snappy", t - CTA);
-        M.write(cta, { scale: 0.8 + 0.2 * s, opacity: M.ease("enter", (t - CTA) / 0.2) });
+        M.write(cta, pushed(cta, { scale: 0.8 + 0.2 * s, opacity: M.ease("enter", (t - CTA) / 0.2) }, k));
         s = M.spring("default", t - 0.85);
-        M.write(url, { y: (1 - s) * lift * 0.5, opacity: 0.75 * M.ease("enter", (t - 0.85) / 0.4) });
+        M.write(url, pushed(url, { y: (1 - s) * lift * 0.5, opacity: 0.75 * M.ease("enter", (t - 0.85) / 0.4) }, k));
         // The underline draws once, then re-lights on every beat: a decaying glow that restarts, a function of t only.
         var since = t - (CTA + 0.2);
         var phase = ((since % P.beat) + P.beat) % P.beat;

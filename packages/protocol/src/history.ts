@@ -204,3 +204,36 @@ export type ClipPlace = z.output<typeof ClipPlaceSchema>;
 export type ClipDiff = z.output<typeof ClipDiffSchema>;
 /** See {@link HistoryDiffResultSchema}. */
 export type HistoryDiffResult = z.output<typeof HistoryDiffResultSchema>;
+
+/** One stretch of a track whose sound a transaction changed, as `history.sound` reports it. */
+export const HistorySoundRangeSchema = z.object({
+  from: z.number().describe("Timeline seconds, as the timeline is right after the target."),
+  to: z.number(),
+  kind: z.enum(["added", "removed", "level"]).describe("`added`: silent before, heard after. `removed`: heard before, silent after. `level`: heard on both sides, at another level."),
+  change: z.number().describe("Median level move in dB over the range (after minus before; silence counts as -60 dBFS)."),
+  largest: z.number().describe("Biggest level move in dB in the range, with its sign."),
+});
+
+/** One track whose sound a transaction changed. */
+export const HistorySoundTrackSchema = z.object({
+  track: z.string().describe("Track id; a program's sound track is `<track>/<inner track>`."),
+  name: z.string(),
+  ranges: z.array(HistorySoundRangeSchema).describe("Changed stretches in time order (at most 20)."),
+  more: z.number().int().describe("Changed stretches past the listed ones."),
+});
+
+/** Result of `history.sound`. */
+export const HistorySoundResultSchema = z.object({
+  timeline: z.string(),
+  target: z.string().describe("The transaction or operation id asked for."),
+  tracks: z.array(HistorySoundTrackSchema).describe("Tracks whose sound changed, by track id."),
+  unchanged: z.array(z.string()).describe("Ids of the tracks heard before or after whose sound did not change."),
+  unheard: z.array(z.string()).describe("Assets that could not be decoded: their clips are not compared."),
+});
+
+/** See {@link HistorySoundRangeSchema}. */
+export type HistorySoundRange = z.output<typeof HistorySoundRangeSchema>;
+/** See {@link HistorySoundTrackSchema}. */
+export type HistorySoundTrack = z.output<typeof HistorySoundTrackSchema>;
+/** See {@link HistorySoundResultSchema}. */
+export type HistorySoundResult = z.output<typeof HistorySoundResultSchema>;

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,9 +59,9 @@ afterAll(async () => {
 
 describe("frameshell analyze", () => {
   it(
-    "measures a video outside the project and prints the cutting, palette, loudness and where the files are",
+    "measures a video outside the project and prints the cutting, palette, loudness and where the files are (--full)",
     () => {
-      const result = frameshell(["analyze", reference, "--no-faces"]);
+      const result = frameshell(["analyze", reference, "--no-faces", "--full"]);
       expect(result.code, result.stderr).toBe(0);
       const dir = join(project, ".frameshell", "analysis", "ref");
       expect(result.stdout).toContain(`Analysis ref of ${reference}: 2 s, 320x240 at 30 fps -> ${dir}`);
@@ -83,6 +83,28 @@ describe("frameshell analyze", () => {
   );
 
   it(
+    "prints only the card by default: labelled lines, then the layers with their size; the folder holds card.md and shots.md",
+    () => {
+      const result = frameshell(["analyze", reference, "--name", "carded", "--no-faces", "--no-speech"]);
+      expect(result.code, result.stderr).toBe(0);
+      const dir = join(project, ".frameshell", "analysis", "carded");
+      expect(result.stdout).toMatch(/^# Analysis carded: /);
+      expect(result.stdout).toMatch(/- \[MEASURED\] Cutting: 1 shots, 0 cuts a minute, median 2 s \(2 to 2 s\)\./);
+      expect(result.stdout).toMatch(/- `shots\.md`: one line per shot: times, colours, look, ink \(\d+ bytes, about \d+ tokens\)/);
+      expect(result.stdout).toMatch(/- `analysis\.json`: every value .* \(\d+ bytes, about \d+ tokens\)/);
+      expect(result.stdout).toContain(`Folder: ${dir} (--full prints every value)`);
+      expect(result.stdout).not.toContain("Shots (start s, length s");
+      // The card stays short: about 300 tokens.
+      expect(readFileSync(join(dir, "card.md"), "utf8").length).toBeLessThan(2400);
+      expect(readFileSync(join(dir, "shots.md"), "utf8")).toMatch(/\n- #1 0-2 s \(2 s\) {2}#[0-9a-f]{6}/);
+      const json = JSON.parse(frameshell(["analyze", reference, "--name", "carded", "--no-faces", "--no-speech", "--json"]).stdout) as { card: string; layers: { file: string }[]; labels: Record<string, string> };
+      expect(json.layers.map((entry) => entry.file)).toEqual(["shots.md", "analysis.json"]);
+      expect(json.card).toBe(readFileSync(join(dir, "card.md"), "utf8"));
+    },
+    120_000,
+  );
+
+  it(
     "takes a name and a threshold, and prints JSON with --json",
     () => {
       const result = frameshell(["analyze", reference, "--name", "first", "--threshold", "0.6", "--no-faces", "--json"]);
@@ -97,7 +119,7 @@ describe("frameshell analyze", () => {
   it(
     "skips the speech with --no-speech and says so",
     () => {
-      const result = frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--no-faces"]);
+      const result = frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--no-faces", "--full"]);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("Speech: skipped, not asked for (speech: false).");
       const json = JSON.parse(frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--no-faces", "--json"]).stdout) as { audio: { speech: { status: string }; effects: unknown }; labels: Record<string, string> };

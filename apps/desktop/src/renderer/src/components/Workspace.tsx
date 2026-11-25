@@ -12,6 +12,7 @@ import {
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { useConnectedAgentTargets } from "../ask/connected-targets.js";
+import { connectPanel } from "../connect/store.js";
 import { agentTargets } from "../ask/agent-targets.js";
 import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
@@ -221,9 +222,14 @@ export function Workspace({ project }: { project: ProjectView }) {
     { ignore: ".terminal-view" },
   );
 
+  /** The terminal panel is on screen, docked open or in its own window: someone is using a terminal. */
+  const terminalShown = useRef(false);
+  terminalShown.current = (layout !== null && !layout.panels.terminal.collapsed) || detached.has("terminal");
+
   // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
   // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
-  // agent anywhere it goes to the clipboard and the status bar says to start one (ADR 0048), never to a bare shell.
+  // agent anywhere it goes to the clipboard, never to a bare shell (ADR 0048). With the terminal on screen the status bar
+  // says to start one there; with it folded (#791) Connect your AI opens, so someone who does not code is never left in a shell.
   // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
@@ -260,6 +266,11 @@ export function Workspace({ project }: { project: ProjectView }) {
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
+            if (!terminalShown.current) {
+              setNotice(warning ?? t.workspace.askConnect);
+              connectPanel.open(window, project.name);
+              return;
+            }
             if (panel) {
               // The terminal shows the agent guide, where one starts.
               revealTerminal();

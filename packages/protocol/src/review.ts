@@ -1,5 +1,6 @@
 import { CRAFT_CHECKS, STYLE_SOURCES, SafeZoneSchema } from "@frameshell/schema";
 import { z } from "zod";
+import type { AnalyzeLayer } from "./analyze.js";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
 // `review`: contact sheets and strips an agent looks at before it shows the person anything.
@@ -640,6 +641,10 @@ export interface ReviewResultShape {
   metrics: ReviewMetrics | null;
   /** What could not be shown (a seam on a one-frame film, nothing moving…); empty when none. */
   warnings: string[];
+  /** `card.md` as text: the verdict and what to fix first, about 300 tokens, to read first (#801). */
+  card: string;
+  /** The files of the run to read after the card, smallest first, with their size (`analyze`'s layers). */
+  layers: AnalyzeLayer[];
 }
 
 /**
@@ -662,6 +667,10 @@ export const ReviewResultSchema: z.ZodType<ReviewResultShape> = z.object({
   safeZones: z.array(ReviewSafeZoneSchema).describe("One entry per platform of the `safe` sheet: its zones in the film's pixels and the captions that cross them; empty without the sheet."),
   metrics: ReviewMetricsSchema.nullable().describe("The numbers, also written to `metrics.json` in `dir`; null when `metrics` is not among the outputs asked for."),
   warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
+  card: z.string().describe("`card.md` in `dir` as text: the verdict, the craft warnings to fix first and the key numbers, each labelled MEASURED, ESTIMATED or DECISION, in about 300 tokens. Read it first."),
+  layers: z
+    .array(z.object({ file: z.string(), bytes: z.int(), tokens: z.int(), holds: z.string() }))
+    .describe("`review.json` and `metrics.json` with their size in bytes and about how many tokens, smallest first: open one only for what the card does not say."),
 });
 
 /** See {@link RequirementsChangeSchema}. */

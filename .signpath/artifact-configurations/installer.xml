@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "installer" (ADR 0051, docs/release.md "Windows signing").
+  Kept here so it is reviewed like code; paste it into the SignPath project (slug: installer) after a change.
+  The artifact is the NSIS installer zipped by actions/upload-artifact (name from artifactName in electron-builder.yml).
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="productVersion" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Frameshell-*-win-x64.exe" product-name="Frameshell" product-version="${productVersion}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

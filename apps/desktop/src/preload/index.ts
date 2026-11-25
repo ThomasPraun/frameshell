@@ -182,6 +182,9 @@ const api: FrameshellApi = {
     trust: (decision) => invokeOutcome(Channel.pluginsTrust, decision),
     downloads: () => invokeOutcome(Channel.pluginsDownloads),
     removeDownload: (name, bytes) => invokeOutcome(Channel.pluginsRemoveDownload, name, bytes),
+    keyState: () => invokeOutcome(Channel.pluginsKeyState),
+    saveKey: (key) => invokeOutcome(Channel.pluginsSaveKey, key),
+    removeKey: () => invokeOutcome(Channel.pluginsRemoveKey),
   },
   people: {
     list: () => invokeOutcome(Channel.peopleList),
@@ -203,7 +206,7 @@ const api: FrameshellApi = {
     screens: () => invokeOutcome(Channel.shootScreens),
     pickScreen: (id, systemAudio) => invokeOutcome(Channel.shootPickScreen, id, systemAudio),
     begin: (sources) => invokeOutcome(Channel.shootBegin, sources),
-    started: (id, starts) => invokeOutcome(Channel.shootStarted, id, starts),
+    started: (id, starts, origin) => invokeOutcome(Channel.shootStarted, id, starts, origin),
     chunk: (id, role, data) => invokeOutcome(Channel.shootChunk, id, role, data),
     end: (id) => invokeOutcome(Channel.shootEnd, id),
     recovered: () => invokeOutcome(Channel.shootRecovered),

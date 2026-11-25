@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -174,6 +174,16 @@ describe("frameshell multicam", () => {
     const refused = frameshell(["clip", "reframe", clipId, "--format", "tall"]);
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain("9x16");
+    // A pointer track resting a quarter in from the left zooms there; one revert takes it back.
+    const rest = Array.from({ length: 60 }, (_, i) => (i >= 20 && i < 44 ? [i / 20, 0.25, 0.5] : [i / 20, (i * 0.37) % 1, 0.5]));
+    writeFileSync(join(project, "assets", ".ana.pointer.json"), JSON.stringify({ version: 1, width: 1920, height: 1080, samples: rest }));
+    const zoomed = frameshell(["clip", "zoom", clipId, "--follow", "pointer", "--scale", "2"]);
+    expect(zoomed.stderr).toBe("");
+    expect(zoomed.stdout).toContain(`Zoom ${clipId} from assets/.ana.pointer.json, 1 rest of the pointer: 1 zoom at 2x, 4 keys on scale, x and y`);
+    expect(clipOf().keys.scale.map((key: { value: number }) => key.value)).toEqual([1, 2, 2, 1]);
+    expect(frameshell(["revert", /tx (\S+)/.exec(zoomed.stdout)![1]!]).code).toBe(0);
+    expect(clipOf().keys).toBeUndefined();
+    expect(frameshell(["clip", "zoom", clipId, "--follow", "clicks"]).stderr).toContain("--follow: expected pointer");
     // Later tests count on the program track being the last one.
     expect(frameshell(["track", "remove", trackId, "--force"]).code).toBe(0);
   }, 60_000);

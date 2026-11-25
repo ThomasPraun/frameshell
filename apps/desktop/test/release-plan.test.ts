@@ -122,6 +122,12 @@ describe("planRelease: platforms", () => {
     expect(plan.executable).toBe("release/win-unpacked/Frameshell.exe");
   });
 
+  it("names the unsigned Windows installer it builds", () => {
+    expect(planRelease({ platform: "win32", arch: "x64", env: tag }).installer).toBe("release/Frameshell-0.1.0-win-x64.exe");
+    expect(planRelease({ platform: "win32", arch: "x64", env: tag, dirOnly: true }).installer).toBeUndefined();
+    expect(planRelease({ platform: "linux", arch: "x64", env: tag }).installer).toBeUndefined();
+  });
+
   it("points the smoke test at the unpacked app for the build machine's architecture", () => {
     expect(planRelease({ platform: "darwin", arch: "arm64", env: tag }).executable).toBe(
       "release/mac-arm64/Frameshell.app/Contents/MacOS/Frameshell",
@@ -135,5 +141,66 @@ describe("planRelease: platforms", () => {
     const plan = planRelease({ platform: "darwin", arch: "arm64", env: {}, dirOnly: true });
     expect(plan.args).toContain("--dir");
     expect(plan.args).toContain("--arm64");
+  });
+});
+
+describe("planRelease: Windows signing through SignPath (ADR 0051)", () => {
+  const signpath = {
+    SIGNPATH_API_TOKEN_SET: "true",
+    SIGNPATH_ORGANIZATION_ID: "00000000-0000-0000-0000-000000000000",
+    SIGNPATH_PROJECT_SLUG: "frameshell",
+    SIGNPATH_SIGNING_POLICY_SLUG: "release-signing",
+  };
+
+  it("stays unsigned when nothing is configured, including the token flag GitHub passes as false", () => {
+    const plan = planRelease({ platform: "win32", arch: "x64", env: { ...tag, SIGNPATH_API_TOKEN_SET: "false" } });
+    expect(plan.errors).toEqual([]);
+    expect(plan.signing).toBe("unsigned");
+    expect(plan.args).not.toContain("--dir");
+  });
+
+  it("builds only the unpacked app first, so the workflow can sign it before the installer is made", () => {
+    const plan = planRelease({ platform: "win32", arch: "x64", env: { ...tag, ...signpath } });
+    expect(plan.errors).toEqual([]);
+    expect(plan.signing).toBe("signpath");
+    expect(plan.args).toEqual(expect.arrayContaining(["--win", "--dir", "--x64"]));
+    expect(plan.installer).toBeUndefined();
+    expect(plan.summary).toMatch(/SignPath/);
+    expect(plan.summary).not.toMatch(/SmartScreen/);
+    // The settings are for the workflow, never for electron-builder.
+    expect(plan.env).toEqual({});
+  });
+
+  it("packages the signed app into the installer in the second run", () => {
+    const plan = planRelease({ platform: "win32", arch: "x64", env: { ...tag, ...signpath }, installer: true });
+    expect(plan.errors).toEqual([]);
+    expect(plan.args).toEqual(expect.arrayContaining(["--win", "--prepackaged", "release/win-unpacked", "--x64"]));
+    expect(plan.args).toContain("-c.extraMetadata.version=0.1.0");
+    expect(plan.args).not.toContain("--dir");
+    expect(plan.installer).toBe("release/Frameshell-0.1.0-win-x64.exe");
+    expect(plan.summary).toBe("");
+  });
+
+  it("refuses a partial configuration and names what is missing", () => {
+    const { SIGNPATH_API_TOKEN_SET: _token, SIGNPATH_PROJECT_SLUG: _slug, ...partial } = signpath;
+    const plan = planRelease({ platform: "win32", arch: "x64", env: { ...tag, ...partial } });
+    expect(plan.errors).toEqual([
+      "The SIGNPATH_API_TOKEN secret is missing (SignPath signing is partly configured).",
+      "The SIGNPATH_PROJECT_SLUG variable is missing (SignPath signing is partly configured).",
+    ]);
+  });
+
+  it("ignores SignPath settings on macOS and Linux", () => {
+    expect(planRelease({ platform: "linux", arch: "x64", env: { ...tag, ...signpath } }).signing).toBe("not-applicable");
+    expect(planRelease({ platform: "darwin", arch: "arm64", env: { ...tag, ...signpath } }).signing).toBe("unsigned");
+  });
+
+  it("rejects the installer phase outside Windows or together with --dir", () => {
+    expect(planRelease({ platform: "linux", arch: "x64", env: tag, installer: true }).errors).toEqual([
+      "--installer is for the Windows SignPath phase only.",
+    ]);
+    expect(planRelease({ platform: "win32", arch: "x64", env: tag, installer: true, dirOnly: true }).errors).toEqual([
+      "--installer and --dir exclude each other.",
+    ]);
   });
 });
