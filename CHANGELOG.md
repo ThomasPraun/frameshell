@@ -148,6 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Open ChatGPT in Connect your AI on a Mac finds OpenAI's ChatGPT.app by its bundle id (`com.openai.codex` since
+  OpenAI merged Codex into it, `com.openai.chat` before), and only then by name, so a browser web app or another
+  app named ChatGPT is not opened by mistake (#795).
 - Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
 - HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
   The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
