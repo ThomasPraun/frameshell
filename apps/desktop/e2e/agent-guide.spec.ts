@@ -23,6 +23,9 @@ test("Start runs a found agent, and a suggestion is typed at its prompt unsent",
   try {
     const guide = page.getByTestId("agent-guide");
     await expect(guide.getByRole("heading", { name: "Talk to an agent" })).toBeVisible();
+    // Connect your AI leads, for someone who came without a terminal; the agents found follow (#740).
+    await expect(guide.getByTestId("agent-guide-connect")).toHaveClass(/primary/);
+    await expect(guide.getByRole("button", { name: "Start Gemini CLI" })).not.toHaveClass(/primary/);
     // Every catalog agent is listed: found ones to start, the rest with their install command.
     await guide.getByRole("button", { name: "Start Gemini CLI" }).click();
     await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");

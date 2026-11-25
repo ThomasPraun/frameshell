@@ -1,0 +1,14 @@
+{
+  "name": "frameshell",
+  "version": "0.1.0",
+  "description": "Frameshell beside the chat: the project's jobs, a waiting review proposal, and a frame of the timeline, read from the running daemon.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "command": {
+      "type": "string",
+      "title": "frameshell command",
+      "description": "The frameshell CLI to run: a name on PATH or an absolute path (on Windows, the full path to frameshell.cmd if a bare name does not start).",
+      "default": "frameshell"
+    }
+  }
+}

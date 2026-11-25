@@ -12,6 +12,10 @@ import {
   GradeLooksResultSchema,
 } from "../grade.js";
 import {
+  ClipTextFitResultSchema,
+  TEXT_FIT_DEFAULT_FRACTIONS,
+  TEXT_FIT_MAX_TIMES,
+  TEXT_FIT_SLACK_PX,
   ClipVerifyResultSchema,
   VERIFY_DEFAULT_PROBES,
   VERIFY_DEFAULT_TOLERANCE,
@@ -151,6 +155,37 @@ export const jobMethods = {
         .describe(`Largest per-channel difference (of 255) that still counts as the same picture. Default ${VERIFY_DEFAULT_TOLERANCE}.`),
     }),
     result: ClipVerifyResultSchema,
+  },
+  "clip.textFit": {
+    description:
+      "Check that every line of text of a generated clip fits (#803): its live page is loaded in headless Chrome at the project resolution, " +
+      "seeked to each time in `at` (default: 50, 70 and 90 percent of the clip's played part, where entrances have settled), and every " +
+      "visible element with text of its own is measured. `outside`: the text passes the edge of the frame; `overflows`: it passes the box " +
+      `of its own element (a button, a card, a line of fixed width). More than ${TEXT_FIT_SLACK_PX} px counts. Use it before a render ` +
+      "when the words change, above all for another language: give the translated strings in `props` (the clip's prop ids, as " +
+      "`clip.set` `props` takes them) and they are tried for this check only, nothing is written; when it fits, set them with `clip.set`. " +
+      "Text that moves in from outside the frame on purpose is reported at a time it is still outside: pass `at` times after it lands. " +
+      "Reads only: never renders, writes no file. Takes a few seconds (one page). Needs the plugin of the clip's type loaded and trusted, " +
+      "and its adapter to have a live preview (`hyperframes` does). Example: `{ timeline: \"main\", clip: \"c_1a2b3c\", props: { title: \"Pruébalo hoy\" } }`. " +
+      "Fails with ClipNotFound, TimelineNotFound, LiveUnavailable, InvalidParams (an `at` outside the clip), OutsideProject, or the Binary* errors.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Generated clip id as `clip.renders` reports it (`<nested clip>/<clip>` inside a nested timeline)."),
+      props: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Props to try instead of the clip's own, merged over them, for this check only (another language's strings). Nothing is written."),
+      at: z
+        .array(z.number().min(0))
+        .min(1)
+        .max(TEXT_FIT_MAX_TIMES)
+        .optional()
+        .describe(
+          `Composition seconds to check (file time of the clip's render, as \`clip.verify\` reports probes). Default: ${TEXT_FIT_DEFAULT_FRACTIONS.map((f) => `${f * 100}%`).join(", ")} of the played part.`,
+        ),
+    }),
+    result: ClipTextFitResultSchema,
   },
   "grade.analyze": {
     description:

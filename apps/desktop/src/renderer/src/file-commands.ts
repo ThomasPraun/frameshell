@@ -39,12 +39,13 @@ export async function voiceoverItems(path: string, view: Window = window): Promi
 }
 
 /**
- * "Audition N sounds…" when `paths` hold two or more sound files: opens the Audition dialog on them in `view`, the window
- * the menu is in. `label` words it for where it was asked (a selection, a folder, music candidates). Empty otherwise.
+ * "Audition N sounds…" when `paths` hold at least `least` sound files: opens the Audition dialog on them in `view`, the
+ * window the menu is in. `label` words it for where it was asked (a selection, a folder, music candidates). Empty
+ * otherwise. One file is enough to listen to it (#757: a single sound could not be heard anywhere); comparing needs two.
  */
-export function auditionItems(paths: readonly string[], label: (count: number) => string, view: Window = window): MenuItem[] {
+export function auditionItems(paths: readonly string[], label: (count: number) => string, view: Window = window, least = 2): MenuItem[] {
   const files = soundFiles(paths);
-  return files.length >= 2 ? [{ label: label(files.length), run: () => void auditionDialog.open(files, view) }] : [];
+  return files.length >= least ? [{ label: label(files.length), run: () => void auditionDialog.open(files, view) }] : [];
 }
 
 /** Reveal, Copy path, then Move to Trash (main asks first; the OS trash is the undo) for project-relative `path`. */

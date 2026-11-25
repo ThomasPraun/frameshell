@@ -58,7 +58,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 184;
+export const PROTOCOL_VERSION = 192;
 
 export {
   type MethodSpec,
@@ -264,6 +264,26 @@ export const notifications = {
       "A shoot file changed or a take was compared (ADR 0023). Sent to connections subscribed with `events.subscribe`. " +
       "Re-read with `shoot.status`.",
     params: ShootChangedSchema,
+  },
+  "transcription.progress": {
+    description:
+      "A `transcribe` request of the project (from any client: CLI, agent, app) started, advanced or ended, so a UI " +
+      "can show transcriptions it did not start (#742). Sent to connections subscribed with `events.subscribe`; " +
+      "progress-only updates at most every 250 ms per request, the end at once. `message`, `fraction`, `stage` and " +
+      "`values` are those of the request's own `progress` notification.",
+    params: z.object({
+      project: z.string().describe("Absolute project root, as returned by `events.subscribe`."),
+      id: z.string().describe("Opaque id of this transcription run; every update of one run carries the same id."),
+      asset: z.string().describe("Project-relative path of the asset being transcribed, e.g. `assets/talk.mp4`."),
+      state: z.enum(["running", "done", "failed"]).describe("`running` while it works; `done` or `failed` once, at the end."),
+      message: z.string().describe("Human line in English, e.g. `Loading model`; on `failed` the error message."),
+      fraction: z.number().min(0).max(1).optional().describe("0..1 of the current step when known."),
+      stage: z.string().optional().describe("Stable step code, as in the `progress` notification."),
+      values: z
+        .record(z.string(), z.union([z.string(), z.number()]))
+        .optional()
+        .describe("Facts the `stage` line is built from, as in the `progress` notification."),
+    }),
   },
   "beats.changed": {
     description:
@@ -493,6 +513,10 @@ export type ClipCompareResult = MethodResult<"clip.compare">;
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */
 export type ClipVerifyResult = MethodResult<"clip.verify">;
+/** `clip.textFit` params. */
+export type ClipTextFitParams = MethodParams<"clip.textFit">;
+/** Result of `clip.textFit`. */
+export type ClipTextFitResult = MethodResult<"clip.textFit">;
 /** `grade.analyze` params. */
 export type GradeAnalyzeParams = MethodParams<"grade.analyze">;
 /** Result of `grade.analyze`. */

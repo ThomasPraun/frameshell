@@ -56,11 +56,12 @@ export function useFileDrop(onDrop: (paths: string[]) => void, { ignore }: { ign
   return dragging;
 }
 
-/** Status bar line after a drop: what was imported, and what was not media. */
-export function importNotice(imported: string[], refused: string[]): string {
+/** Status bar line after a drop: what was imported, what was not media, and (`notLayers`) what an image project could not stack. */
+export function importNotice(imported: string[], refused: string[], notLayers: readonly string[] = []): string {
   const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
   const parts: string[] = [];
   if (imported.length > 0) parts.push(t.workspace.imported(imported.map(name).join(", ")));
   if (refused.length > 0) parts.push(t.workspace.notMedia(refused.map(name).join(", ")));
+  if (notLayers.length > 0) parts.push(t.workspace.notLayers(notLayers.map(name).join(", ")));
   return parts.join(" ");
 }

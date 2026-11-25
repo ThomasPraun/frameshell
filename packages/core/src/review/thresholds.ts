@@ -162,3 +162,16 @@ export const BEHIND_FLOATS = 0.15;
 export const BEHIND_EATEN = 0.65;
 /** Width a word's render alpha is read at for its covered share, px; the matte is read at its own (proxy) size. */
 export const BEHIND_WIDTH = 320;
+
+// The sound difference of one transaction (`history.sound`, #803): which tracks it changed and where.
+
+/** dB a track's level must move at a hop for the hop to count as changed: under it, a gain nudge nobody hears. */
+export const SOUND_DIFF_DB = 1;
+/** dBFS under which a track counts as silent at a hop, before and after: a level change down there is not heard. */
+export const SOUND_DIFF_FLOOR_DBFS = -60;
+/** Changed hops closer than this many seconds join one range. */
+export const SOUND_DIFF_GAP_S = 0.1;
+/** Ranges shorter than this many seconds are dropped: an edge a few samples off is no change. */
+export const SOUND_DIFF_MIN_S = 0.05;
+/** Most ranges listed per track; `more` counts the rest. */
+export const SOUND_DIFF_LISTED = 20;

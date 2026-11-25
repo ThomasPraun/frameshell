@@ -107,13 +107,18 @@ export type AudioOrientation = "landscape" | "portrait";
 export interface IdeaBrief {
   /** Name of the video; also the project's name. */
   name: string;
-  /** Built-in format ids (`16x9`, `9x16`, `1x1`, `4x5`); the first of the built-in list becomes the project's own size. */
+  /** Built-in format ids (`16x9`, `9x16`, `1x1`, `4x5`); the first is the main format and becomes the project's own size. */
   formats: string[];
   /** Rough length in seconds; null when unsure. */
   seconds: number | null;
   /** A page to take the idea from (http or https); null when none. */
   url: string | null;
+  /** What the video is about, in the person's words; null when not said. Absent in briefs from before it existed. */
+  about?: string | null;
 }
+
+/** A way of making a project the File menu starts on the welcome screen: from video files, or from an idea. */
+export type WelcomeStart = "video" | "idea";
 
 /** Folder a project made from an idea goes in, as main planned it: `parent`/`name`, numbered when the name is taken. */
 export interface IdeaProjectPlan {
@@ -131,6 +136,14 @@ export interface TerminalInfo {
   session: string;
   /** Shell executable name for the tab title, e.g. `zsh`. */
   shell: string;
+}
+
+/** A terminal of the window that outlived its view, as {@link FrameshellApi.terminals} `list` reports it. */
+export interface TerminalSurvivor extends TerminalInfo {
+  /** Its shell's exit code once it exited; null while it runs. */
+  exitCode: number | null;
+  /** Agent CLI running in it now, e.g. `claude`; null when none or unknown. */
+  agent: string | null;
 }
 
 /**
@@ -276,8 +289,18 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * OpenTimelineIO, ADR 0045) or a Premiere Pro XML file (File > Export Premiere XML, ADR 0047).
  * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
+ * `showShoot`, `showTeleprompter`: show the sidebar on the Shoot or Teleprompter view (View > Shoot, View > Teleprompter).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
+export type MenuCommand =
+  | "showTranscript"
+  | "imageFromFrame"
+  | "exportVideo"
+  | "exportOtio"
+  | "exportPremiere"
+  | "toggleReview"
+  | "toggleTerminal"
+  | "showShoot"
+  | "showTeleprompter";
 
 export type { HandoffKind };
 
@@ -305,16 +328,26 @@ export interface FrameshellApi {
     revealRecent(dir: string): Promise<void>;
     /** Stop warning that this window's project is in a synced folder; kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
-    /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
-    chooseVideos(): Promise<VideoProjectPlan | null>;
+    /**
+     * Choose videos, audio or pictures with the OS dialog and plan their project: `plan` null when none is media,
+     * `refused` the chosen files that are not (#751: a `.txt` slipped into the plan). Null when cancelled.
+     * Rejects on unreadable files.
+     */
+    chooseVideos(): Promise<{ plan: VideoProjectPlan | null; refused: string[] } | null>;
     /**
      * Plan the project for the videos among `files` (e.g. dropped), optionally
      * in another `parent` or under another `name`. `refused` lists what is not
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
+    /** Bytes a new project downloads before it can transcribe (the tool and model, once per machine); 0 when ready. */
+    transcriptionDownload(): Promise<number>;
     /** Videos or audio the OS asked to open in this window (Open with), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
+    /** How File > New … asked this welcome screen to start, once: null when not asked or already taken. */
+    takeStart(): Promise<WelcomeStart | null>;
+    /** Called when File > New … asks this window to start; take it with {@link takeStart}. Returns an unsubscribe function. */
+    onStartOffered(listener: () => void): () => void;
     /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
     onVideosOffered(listener: () => void): () => void;
     /** Pick the folder a new project goes in; null when cancelled. */
@@ -343,11 +376,16 @@ export interface FrameshellApi {
     /**
      * Create an empty project for `brief`, without footage, and open it in this window: `project.init` at the
      * size of the first format, then `format.add` for each other one, through the daemon. `parent` is the folder
-     * it goes in (default the videos folder). The brief is kept for {@link takeIdea}.
+     * it goes in (default the videos folder). The brief is kept in the project's `brief.md`, for {@link readIdea}.
      */
     fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
-    /** The brief this window's project was made from, once: null when it was not made from an idea or already taken. */
-    takeIdea(): Promise<IdeaBrief | null>;
+    /** The brief this window's project was made from (its `brief.md`, #752): null when it was not made from an idea. */
+    readIdea(): Promise<IdeaBrief | null>;
+    /**
+     * Add built-in format `id` (`1x1`, `4x5`, `9x16`, `16x9`) to this window's project, after the others: daemon
+     * `format.add`, journaled like any format change (ADR 0027, 0036). Rejects with the daemon's message.
+     */
+    addFormat(id: string): Promise<void>;
     /**
      * Setup still running, or just ended, for this window's project;
      * null when none. With `transcribe`, {@link fromVideos} installs the
@@ -379,12 +417,19 @@ export interface FrameshellApi {
   terminals: {
     create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
     /**
+     * The window's terminals not closed yet, oldest first. After a reload (a language change, Ctrl+R) the panel
+     * shows these again, so the shells and agents in them go on; empty in a fresh window.
+     */
+    list(): Promise<TerminalSurvivor[]>;
+    /**
      * Output to feed a view mounting on terminal `id` (ADR 0012): its recent
      * output, about 10,000 lines. Data events sent before the reply are in
      * it; later ones are not. Null once the terminal was killed.
      */
     attach(id: string): Promise<string | null>;
     write(id: string, data: string): void;
+    /** Whether the system clipboard holds text now (#743): Ctrl+V pastes it, else the program gets its ^V. */
+    clipboardHasText(): Promise<boolean>;
     resize(id: string, cols: number, rows: number): void;
     kill(id: string): void;
     onData(listener: (id: string, data: string) => void): () => void;
@@ -451,6 +496,17 @@ export interface FrameshellApi {
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
     /**
+     * Pick pictures with the OS dialog, import them into `assets/` and {@link addLayers} them: the Layers panel's
+     * Add image button (#751). Resolves with the new track ids, or null when cancelled.
+     */
+    addImages(timeline: string): Promise<string[] | null>;
+    /**
+     * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
+     * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
+     * track of its kind, adding one when there is none. Resolves with the new clip ids and what the daemon refused.
+     */
+    addMedia(timeline: string, assets: string[], target?: { track: string; start: number }): Promise<{ clips: string[]; refused: { asset: string; message: string }[] }>;
+    /**
      * Cut the part of a photo that `mask` (project-relative grayscale PNG, from a Pick) marks out as a new layer
      * right above it (`image.cutout`, ADR 0022), as one undoable step. Resolves with the new clip id.
      */
@@ -467,6 +523,19 @@ export interface FrameshellApi {
      * the file leaves out, or null when cancelled. Rejects with the daemon's message (an image project has nothing to export).
      */
     exportHandoff(kind: HandoffKind, timeline: string): Promise<{ path: string; warnings: string[] } | null>;
+    /**
+     * Export `timeline` as an MP4 where the user picks in the OS dialog (#738): the daemon's `render`, a background job.
+     * Resolves with the job as it started, the file it writes and what the export leaves out, or null when cancelled.
+     * Rejects with the daemon's message (an empty timeline, clips it cannot render).
+     */
+    exportVideo(timeline: string): Promise<{ job: JobInfo; output: string; warnings: string[] } | null>;
+    /** Called on every change of a video export job of the project (daemon `job.progress`, kind `render`); `null` after a daemon reconnect. */
+    onExportJob(listener: (job: JobInfo | null) => void): () => void;
+    /**
+     * Show a file {@link exportVideo}, {@link exportImage} or {@link exportHandoff} wrote this run in Finder / Explorer /
+     * the file manager; any other path is ignored.
+     */
+    revealExport(path: string): Promise<void>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
@@ -520,6 +589,8 @@ export interface FrameshellApi {
      * Never rejects for an app that is missing or will not start: that is the result's `problem`.
      */
     openApp(id: DesktopAppId, phrase: string): Promise<DesktopAppOpened>;
+    /** Show settings file `file` of app `id` in the system's file manager (#753); only a file that app's status lists. */
+    showFile(id: AiAppId, file: string): Promise<void>;
     /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
     targets(): Promise<AgentTarget[]>;
     /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
@@ -639,7 +710,7 @@ export interface FrameshellApi {
      * main sends `yes` only after the person confirms. Progress arrives through {@link FrameshellApi.voiceover}`.onProgress`.
      * Rejects with the daemon's message when it fails.
      */
-    generate(path: string, verify: boolean): Promise<VoiceoverRun>;
+    generate(path: string, verify: boolean, provider?: string): Promise<VoiceoverRun>;
     /**
      * Stop the generations the app has running in the window's project (daemon `voiceover.cancel`, never an agent's
      * run); the takes finished stay. Resolves false when there was none to stop.
@@ -652,9 +723,10 @@ export interface FrameshellApi {
     /**
      * Place the takes of a project-relative voiceover script on the main timeline (daemon `voiceover.place`, one
      * transaction). `start` is what the person typed: seconds, a marker, `beat:N` or `bar:N`; empty = after the
-     * voice track's last clip. `replace` removes the clips already playing these takes first. Rejects with the daemon's message.
+     * voice track's last clip (a decimal comma is a decimal point). `replace` removes the clips already playing these takes
+     * first. A refusal the person can act on resolves as `refused`; anything else rejects with the daemon's message.
      */
-    place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceResult>;
+    place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceRun>;
   };
   transcript: {
     /**
@@ -701,6 +773,15 @@ export interface FrameshellApi {
      * daemon's message, e.g. BinaryInUse.
      */
     removeDownload(name: string, bytes: number): Promise<BinariesRemoveResult | null>;
+    /** Where the OpenAI key comes from (ADR 0050); never the key itself. */
+    keyState(): Promise<OpenAiKeyState>;
+    /**
+     * Encrypt and keep the OpenAI key typed in the Plugins view, then hand it to the daemon. Rejects when this
+     * computer cannot encrypt it or it is malformed; the message never holds the key.
+     */
+    saveKey(key: string): Promise<OpenAiKeyState>;
+    /** Forget the saved OpenAI key, in the app and the daemon. */
+    removeKey(): Promise<OpenAiKeyState>;
   };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
@@ -755,8 +836,15 @@ export interface FrameshellApi {
      * Resolves with the session id. Rejects when a session is already recording in this window.
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
-    /** Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<void>;
+    /**
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. `origin` is the
+     * renderer's `performance.timeOrigin`, so main can put the screen's start on the clock of its pointer track.
+     * Resolves with whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when
+     * another app owns it.
+     */
+    started(id: string, starts: Partial<Record<ShootRole, number>>, origin?: number): Promise<boolean>;
+    /** Called when the global End shortcut is pressed while this window records. Returns an unsubscribe function. */
+    onEndRequested(listener: () => void): () => void;
     /** Append one recorded chunk of `role` to its file, in call order per role. */
     chunk(id: string, role: ShootRole, data: Uint8Array): Promise<void>;
     /**
@@ -946,13 +1034,38 @@ export type VoiceoverVerifyPlan = { kind: "ready" } | { kind: "download"; bytes:
 export type VoiceoverRun =
   | { status: "done"; result: VoiceoverGenerateResult }
   | { status: "declined" }
-  | { status: "canceled"; kept: number };
+  | { status: "canceled"; kept: number }
+  /** No voice to say it (#756): the script names no provider (`missing` null) or one not in this project; `available` can be picked. */
+  | { status: "no-voice"; missing: string | null; available: VoiceChoice[] };
+
+/** A speech provider the voiceover dialog can offer: its id and the name to show. */
+export interface VoiceChoice {
+  id: string;
+  name: string;
+}
+
+/** What placing the takes came to: placed, or refused for a reason the dialog words (#756). */
+export type VoiceoverPlaceRun =
+  | { status: "placed"; result: VoiceoverPlaceResult }
+  | {
+      status: "refused";
+      reason: { kind: "replace" } | { kind: "before-zero" } | { kind: "no-tempo" } | { kind: "unknown-time"; value: string } | { kind: "other"; message: string };
+    };
 
 /** What the Plugins view reads about the window's project: the official catalog and every plugin it declares. */
 export interface PluginsView {
   catalog: MethodResult<"plugin.catalog">;
   /** As `plugin.list` reports them, official or not. */
   declared: PluginInfo[];
+}
+
+/**
+ * Where the OpenAI key comes from (ADR 0050): the environment (wins), the key saved in this app, or nowhere.
+ * `storable` is false when this computer cannot encrypt a key, so the view offers no field.
+ */
+export interface OpenAiKeyState {
+  source: "environment" | "app" | "none";
+  storable: boolean;
 }
 
 /** Managed downloads of this machine as `doctor` reports them: on disk (`downloads`) and every tool (`binaries`). */
@@ -977,6 +1090,8 @@ export interface VoiceoverProgress {
   stage: "confirm" | "speak" | "verify" | "download";
   line: string | null;
   fraction: number | null;
+  /** Which line of how many, 1-based, when the daemon says it (#756). */
+  place: { index: number; total: number } | null;
 }
 
 /** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */
@@ -1086,6 +1201,12 @@ export interface AiAppChange {
   problem: AiAppProblem | null;
 }
 
+/**
+ * The global shortcut that ends a recording shoot from any app (#744), `Mod` standing for ⌘ on macOS and Ctrl
+ * elsewhere. Main registers it only while a session records.
+ */
+export const SHOOT_END_KEYS = "Mod+Alt+Shift+S";
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
@@ -1095,6 +1216,7 @@ export const Channel = {
   agentsConnect: "agents:connect",
   agentsDisconnect: "agents:disconnect",
   agentsOpenApp: "agents:open-app",
+  agentsShowFile: "agents:show-file",
   agentsTargets: "agents:targets",
   agentsSend: "agents:send",
   agentsTargetsChanged: "agents:targets-changed",
@@ -1113,10 +1235,14 @@ export const Channel = {
   projectFromVideos: "project:from-videos",
   projectPlanIdea: "project:plan-idea",
   projectFromIdea: "project:from-idea",
-  projectTakeIdea: "project:take-idea",
+  projectReadIdea: "project:read-idea",
+  projectAddFormat: "project:add-format",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",
+  projectTranscriptionDownload: "project:transcription-download",
+  projectTakeStart: "project:take-start",
+  projectStartOffered: "project:start-offered",
   projectVideosOffered: "project:videos-offered",
   mediaImport: "media:import",
   filesTree: "files:tree",
@@ -1131,10 +1257,13 @@ export const Channel = {
   voiceoverMarkers: "voiceover:markers",
   voiceoverPlace: "voiceover:place",
   filesReveal: "files:reveal",
+  exportsReveal: "exports:reveal",
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
+  terminalList: "terminal:list",
   terminalWrite: "terminal:write",
+  terminalClipboardHasText: "terminal:clipboard-has-text",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",
   terminalData: "terminal:data",
@@ -1150,9 +1279,13 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineAddImages: "timeline:add-images",
+  timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
   timelineExportHandoff: "timeline:export-handoff",
+  timelineExportVideo: "timeline:export-video",
+  timelineExportJob: "timeline:export-job",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
@@ -1198,6 +1331,9 @@ export const Channel = {
   pluginsTrust: "plugins:trust",
   pluginsDownloads: "plugins:downloads",
   pluginsRemoveDownload: "plugins:remove-download",
+  pluginsKeyState: "plugins:key-state",
+  pluginsSaveKey: "plugins:save-key",
+  pluginsRemoveKey: "plugins:remove-key",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",
@@ -1220,6 +1356,7 @@ export const Channel = {
   shootEnd: "shoot:end",
   shootRecovered: "shoot:recovered",
   shootRecoveredChanged: "shoot:recovered-changed",
+  shootEndRequested: "shoot:end-requested",
   shootCut: "shoot:cut",
   shootCheck: "shoot:check",
   shootStatus: "shoot:status",

@@ -10,7 +10,12 @@ const en = {
     `Your version is kept at ${preserved}.\n${message}`,
   dismiss: "Dismiss",
   /** Slot: `{assets}`, the `assets/` folder name. */
-  emptyHint: "Ask the agent in the terminal to cut your footage, or drop media into {assets}.",
+  emptyHint: "Drag a video or sound from Files onto the timeline (or right-click it in {assets}: Add to timeline), or ask the agent in the terminal to cut your footage.",
+  /** A video made from an idea, still empty: no footage to cut (#752). */
+  emptyIdea: "Nothing here yet. Ask your agent to make the film from your brief ({brief}); its clips appear here as it builds them.",
+  /** Status line after media was put on the timeline from Files; `refused`: file names the daemon refused, with its reason. */
+  mediaAdded: (count: number) => (count === 1 ? "Added 1 clip to the timeline." : `Added ${count} clips to the timeline.`),
+  mediaRefused: (names: string, message: string) => `Could not add ${names}: ${message}`,
   keysLabel: (mac: boolean) => {
     const mod = mac ? "Command" : "Control";
     return (
@@ -19,14 +24,18 @@ const en = {
       "drag over empty space selects a time range; the ruler moves the playhead. " +
       "Click a subtitle cue to select its words, or a subtitle lane to set its style. " +
       "S splits at the playhead, [ and ] trim to it, comma and period nudge a frame, Delete removes, Shift+Delete ripple deletes, " +
-      "arrows move the playhead, N toggles snapping, Escape clears. Plus and minus zoom, 0 fits the timeline. " +
+      "arrows move the playhead, N toggles snapping, M adds a marker at the playhead, Escape clears. Plus and minus zoom, 0 fits the clips. " +
       `${mod}+Z undoes, ${mac ? "Command+Shift+Z" : "Control+Y"} redoes, also from the Edit menu.`
     );
   },
   nothingToUndo: "Nothing to undo",
   nothingToRedo: "Nothing to redo",
   addTrackFirst: "Add a video or audio track first: subtitles follow one",
-  notMoved: (count: number) => `Not moved: ${count} clips would overlap a clip that stays`,
+  notMoved: (count: number) => `Not moved: ${count === 1 ? "1 clip" : `${count} clips`} would overlap a clip that stays`,
+  /** After an undo: the History title of what it took back. */
+  undone: (title: string) => `Undone: ${title}`,
+  /** After a redo: the History title of what it brought back. */
+  redone: (title: string) => `Redone: ${title}`,
   roughSnap: (window: number, time: string) => `No pause within ${window} s of ${time}: speech may be clipped there`,
   edgeSnapped: (duration: string) => `Edge snapped ${duration} into a pause`,
   saved: (label: string) => `${label} saved`,
@@ -53,7 +62,7 @@ const en = {
   zoomOut: "Zoom out",
   zoomOutTitle: "Zoom out (-)",
   zoomFit: "Zoom to fit",
-  zoomFitTitle: "Zoom to fit (0)",
+  zoomFitTitle: "Zoom to fit the clips (0)",
   zoomIn: "Zoom in",
   zoomInTitle: "Zoom in (+)",
   snapping: "Snapping",
@@ -62,15 +71,23 @@ const en = {
   rippleTrimTitle: "Ripple trim: edge drags move later clips along, leaving no gap (R; hold Shift when pressing an edge to invert)",
   addSubtitleTrack: "Add subtitle track",
   addSubtitleTitle: "Add subtitles: the transcript words of the selected clip's track (or the first transcribed one)",
-  subtitleHeadTitle: (id: string) => `${id}: select to set its style`,
-  programHeadTitle: (id: string) => `${id}: select to edit its angles`,
+  subtitleHeadTitle: (track: string) => `${track}: select to set its style`,
+  programHeadTitle: (track: string) => `${track}: select to edit its angles`,
   wordsOf: (label: string) => `Words of ${label}`,
-  changesOf: (target: string) => `Changes of ${target}`,
-  diffKinds: { added: "added", removed: "removed", moved: "moved", changed: "changed" },
+  changesOf: (title: string, id: string) => `Changes of “${title}” (${id})`,
   stopShowing: "Stop showing these changes",
   stopShowingTitle: "Stop showing these changes (Esc on the lanes)",
   range: (from: string, to: string) => `${from} to ${to}`,
-  clipDetail: (duration: string, track: string, type: string) => `${duration} on ${track}, ${type}`,
+  /** `kind`: from {@link clipKinds}, null for a media clip (its name is the file). */
+  clipDetail: (duration: string, track: string, kind: string | null) => `${duration} on ${track}${kind ? `, ${kind}` : ""}`,
+  /** What a clip is, in its tooltip; generated clips name their plugin type. */
+  clipKinds: {
+    timeline: "nested timeline",
+    shot: "shot",
+    generated: (type: string) => `generated (${type})`,
+  },
+  renderFailed: (error: string) => `Render failed: ${error}`,
+  openComposition: "Open composition",
   formatOverrides: (formats: string) => `Adjusted in ${formats}`,
   clipsCount: (count: number) => `${count} clips`,
   moveTitle: (what: string) => `Move ${what}`,
@@ -95,6 +112,7 @@ const en = {
   /** Screen-reader line of a marker. */
   markerItem: (label: string, at: string) => `Marker ${label}, ${at}`,
   addMarker: "Add marker here",
+  addMarkerAtPlayhead: "Add marker at the playhead",
   renameMarker: (label: string) => `Rename marker ${label}`,
   deleteMarker: (label: string) => `Delete marker ${label}`,
   markerName: "Marker name",
@@ -107,7 +125,15 @@ const en = {
   /** Canvas label of a clip whose end cannot be derived. */
   lengthUnknownShort: "length unknown",
   lengthUnknown: "Length unknown",
+  /** The timeline file does not read (#757); the daemon's message goes under Details. */
+  unreadable: (file: string) => `${file} could not be read, so the timeline is not shown. Fix the file, or go back to an earlier version in History.`,
+  notShown: "The timeline could not be shown.",
+  details: "Details",
+  openTimelineFile: "Open the file",
+  showHistory: "Show History",
   muted: "muted",
+  /** A clip whose volume dips under other tracks (`track.duck`, #757). */
+  ducked: "ducked",
   opacity: (percent: number) => `${percent}% opacity`,
   /** Shot layouts (ADR 0016), by stored value. */
   layouts: { solo: "Solo", "two-up": "Two-up", grid: "Grid", screen: "Screen", pip: "Screen + inset" },
@@ -117,8 +143,8 @@ const en = {
   wordsShowHere: (track: string) => `Words show here once the clips of ${track} are transcribed`,
   showTurnLanes: "Show who speaks, one lane per angle",
   hideTurnLanes: "Hide the turn lanes",
-  turnLanesTitle: (id: string, mac: boolean) =>
-    `${id}: who speaks, one lane per angle. Drag on a lane to say that person speaks there and the others do not; ` +
+  turnLanesTitle: (track: string, mac: boolean) =>
+    `${track}: who speaks, one lane per angle. Drag on a lane to say that person speaks there and the others do not; ` +
     `Shift keeps the others, ${mac ? "Option" : "Alt"} marks that person silent; right-click goes back to the measured turns.`,
   turnLaneLabel: (name: string) => `Turns of ${name}`,
   turnLaneTitle: (name: string) => `${name}: speaking turns. Framed: said by hand. Hatched: marked silent by hand.`,
@@ -135,6 +161,11 @@ const en = {
   hideTrack: "Hide track",
   showTrack: "Show track",
   trackMuted: "Muted: this track plays no sound in preview and export",
+  /** Sound switch on a track header: what a click does. */
+  muteToggle: (muted: boolean): string => (muted ? "Muted: click to hear this track again" : "Mute this track in preview and export"),
+  /** Picture switch on a track header: what a click does. */
+  hideToggle: (hidden: boolean): string =>
+    hidden ? "Hidden: click to show this track again" : "Hide this track's picture in preview and export (its sound still plays)",
   trackHidden: "Hidden: this track shows no picture in preview and export; its sound still plays",
   /** Track menu entry (ADR 0032): this track's pictures go behind the person in front on the lower track `plate` (a label such as `V1`). */
   behindPerson: (plate: string) => `Put behind the person on ${plate}`,
@@ -167,7 +198,11 @@ const es: typeof en = {
     `Se rechazó la edición de timelines/${timeline}.json (${reason}); se restauró la línea de tiempo. ` +
     `Tu versión se conserva en ${preserved}.\n${message}`,
   dismiss: "Descartar",
-  emptyHint: "Pídele al agente en la terminal que corte tu material, o suelta archivos multimedia en {assets}.",
+  emptyHint:
+    "Arrastra un video o un sonido desde Archivos hasta la línea de tiempo (o haz clic derecho sobre él en {assets}: Agregar a la línea de tiempo), o pídele al agente en la terminal que corte tu material.",
+  emptyIdea: "Todavía no hay nada. Pídele a tu agente que haga la película a partir de tu brief ({brief}); sus clips aparecen aquí a medida que los arma.",
+  mediaAdded: (count) => (count === 1 ? "Se agregó 1 clip a la línea de tiempo." : `Se agregaron ${count} clips a la línea de tiempo.`),
+  mediaRefused: (names, message) => `No se pudo agregar ${names}: ${message}`,
   keysLabel: (mac) => {
     const mod = mac ? "Comando" : "Control";
     return (
@@ -176,14 +211,16 @@ const es: typeof en = {
       "arrastrar sobre un espacio vacío selecciona un rango de tiempo; la regla mueve el cursor de reproducción. " +
       "Haz clic en un bloque de subtítulo para seleccionar sus palabras, o en una pista de subtítulos para definir su estilo. " +
       "S divide en el cursor de reproducción, [ y ] recortan hasta él, coma y punto mueven un fotograma, Suprimir elimina, Mayús+Suprimir elimina y cierra el hueco, " +
-      "las flechas mueven el cursor de reproducción, N activa o desactiva el ajuste, Escape borra la selección. Más y menos hacen zoom, 0 ajusta la línea de tiempo. " +
+      "las flechas mueven el cursor de reproducción, N activa o desactiva el ajuste, M añade un marcador en el cursor de reproducción, Escape borra la selección. Más y menos hacen zoom, 0 ajusta los clips. " +
       `${mod}+Z deshace, ${mac ? "Comando+Mayús+Z" : "Control+Y"} rehace, también desde el menú Edición.`
     );
   },
   nothingToUndo: "Nada que deshacer",
   nothingToRedo: "Nada que rehacer",
   addTrackFirst: "Primero agrega una pista de video o audio: los subtítulos siguen a una",
-  notMoved: (count) => `No se movió: ${count} clips se superpondrían con un clip que se queda`,
+  notMoved: (count) => `No se movió: ${count === 1 ? "1 clip se superpondría" : `${count} clips se superpondrían`} con un clip que se queda`,
+  undone: (title) => `Deshecho: ${title}`,
+  redone: (title) => `Rehecho: ${title}`,
   roughSnap: (window, time) => `No hay una pausa a menos de ${window} s de ${time}: el habla podría cortarse ahí`,
   edgeSnapped: (duration) => `El borde se ajustó ${duration} a una pausa`,
   saved: (label) => `${label} guardado`,
@@ -210,7 +247,7 @@ const es: typeof en = {
   zoomOut: "Alejar",
   zoomOutTitle: "Alejar (-)",
   zoomFit: "Ajustar al panel",
-  zoomFitTitle: "Ajustar al panel (0)",
+  zoomFitTitle: "Ajustar los clips al panel (0)",
   zoomIn: "Acercar",
   zoomInTitle: "Acercar (+)",
   snapping: "Ajuste magnético",
@@ -220,15 +257,21 @@ const es: typeof en = {
     "Recortar y cerrar hueco: al arrastrar un borde, los clips siguientes lo acompañan sin dejar hueco (R; mantén Mayús al presionar un borde para invertir)",
   addSubtitleTrack: "Agregar pista de subtítulos",
   addSubtitleTitle: "Agregar subtítulos: las palabras de la transcripción de la pista del clip seleccionado (o de la primera transcrita)",
-  subtitleHeadTitle: (id) => `${id}: selecciona para definir su estilo`,
-  programHeadTitle: (id) => `${id}: selecciona para editar sus ángulos`,
+  subtitleHeadTitle: (track) => `${track}: selecciona para definir su estilo`,
+  programHeadTitle: (track) => `${track}: selecciona para editar sus ángulos`,
   wordsOf: (label) => `Palabras de ${label}`,
-  changesOf: (target) => `Cambios de ${target}`,
-  diffKinds: { added: "agregados", removed: "eliminados", moved: "movidos", changed: "cambiados" },
+  changesOf: (title, id) => `Cambios de «${title}» (${id})`,
   stopShowing: "Dejar de mostrar estos cambios",
   stopShowingTitle: "Dejar de mostrar estos cambios (Esc en las pistas)",
   range: (from, to) => `${from} a ${to}`,
-  clipDetail: (duration, track, type) => `${duration} en ${track}, ${type}`,
+  clipDetail: (duration, track, kind) => `${duration} en ${track}${kind ? `, ${kind}` : ""}`,
+  clipKinds: {
+    timeline: "línea de tiempo anidada",
+    shot: "plano",
+    generated: (type) => `generado (${type})`,
+  },
+  renderFailed: (error) => `Falló el render: ${error}`,
+  openComposition: "Abrir composición",
   formatOverrides: (formats) => `Ajustado en ${formats}`,
   clipsCount: (count) => `${count} clips`,
   moveTitle: (what) => `Mover ${what}`,
@@ -250,6 +293,7 @@ const es: typeof en = {
   markersTitle: "Puntos con nombre de la línea de tiempo. Haz clic en uno para llevar el cursor de reproducción ahí; haz clic derecho en la regla para añadir, renombrar o eliminar uno. Los clips que arrastras se ajustan a ellos.",
   markerItem: (label, at) => `Marcador ${label}, ${at}`,
   addMarker: "Añadir marcador aquí",
+  addMarkerAtPlayhead: "Añadir marcador en el cursor de reproducción",
   renameMarker: (label) => `Renombrar el marcador ${label}`,
   deleteMarker: (label) => `Eliminar el marcador ${label}`,
   markerName: "Nombre del marcador",
@@ -259,7 +303,13 @@ const es: typeof en = {
     `Escena ${title}, de ${from} a ${to}, ${planned ? "planificada, " : ""}${clips === 0 ? "sin clips todavía" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", seleccionada" : ""}`,
   lengthUnknownShort: "duración desconocida",
   lengthUnknown: "Duración desconocida",
+  unreadable: (file) => `No se pudo leer ${file}, así que la línea de tiempo no se muestra. Corrige el archivo o vuelve a una versión anterior en Historial.`,
+  notShown: "No se pudo mostrar la línea de tiempo.",
+  details: "Detalles",
+  openTimelineFile: "Abrir el archivo",
+  showHistory: "Mostrar Historial",
   muted: "silenciado",
+  ducked: "atenuada bajo la voz",
   opacity: (percent) => `${percent}% de opacidad`,
   layouts: { solo: "Individual", "two-up": "A dos", grid: "Cuadrícula", screen: "Pantalla", pip: "Pantalla + recuadro" },
   doubtful: (percent) => `${percent}% de certeza`,
@@ -267,8 +317,8 @@ const es: typeof en = {
   wordsShowHere: (track) => `Aquí aparecerán las palabras cuando se transcriban los clips de ${track}`,
   showTurnLanes: "Mostrar quién habla, una pista por ángulo",
   hideTurnLanes: "Ocultar las pistas de turnos",
-  turnLanesTitle: (id, mac) =>
-    `${id}: quién habla, una pista por ángulo. Arrastra sobre una pista para indicar que esa persona habla ahí y las demás no; ` +
+  turnLanesTitle: (track, mac) =>
+    `${track}: quién habla, una pista por ángulo. Arrastra sobre una pista para indicar que esa persona habla ahí y las demás no; ` +
     `Mayús conserva a las demás, ${mac ? "Opción" : "Alt"} la marca en silencio; clic derecho vuelve a los turnos medidos.`,
   turnLaneLabel: (name) => `Turnos de ${name}`,
   turnLaneTitle: (name) => `${name}: turnos de habla. Con marco: indicados a mano. Rayados: marcados en silencio a mano.`,
@@ -285,6 +335,9 @@ const es: typeof en = {
   hideTrack: "Ocultar pista",
   showTrack: "Mostrar pista",
   trackMuted: "Silenciada: esta pista no suena en la vista previa ni en la exportación",
+  muteToggle: (muted) => (muted ? "Silenciada: haz clic para volver a oír esta pista" : "Silenciar esta pista en la vista previa y la exportación"),
+  hideToggle: (hidden) =>
+    hidden ? "Oculta: haz clic para volver a mostrar esta pista" : "Ocultar la imagen de esta pista en la vista previa y la exportación (su sonido se sigue oyendo)",
   trackHidden: "Oculta: esta pista no muestra imagen en la vista previa ni en la exportación; su sonido se sigue oyendo",
   behindPerson: (plate) => `Poner detrás de la persona de ${plate}`,
   stopBehindPerson: "Dejar de ir detrás de la persona",

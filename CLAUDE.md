@@ -40,6 +40,7 @@ Area rules live in nested `CLAUDE.md` files. Claude Code loads one when you read
 | MCP server (tools from registry, resources, skill as resources `frameshell://skill`, frame images, default project from active window, `--channel` Claude Code channel push; `ui_*` state + navigation, broker daemon → app window) | `docs/mcp.md`; `packages/mcp/src/server.ts`, `packages/mcp/src/project.ts`, `packages/mcp/src/skill.ts`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts`; ADR 0014 |
 | Agent skill (content, bundle into core, shipped hashes + refresh of project copy, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/` (`refresh.ts`, `shipped.json` grows on `pnpm gen:skill`), `packages/core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 | Release packaging, signing secrets, cutting a release, update files | `docs/release.md` |
+| Claude Code mod (pane, band, status line; reads `frameshell status --json`; marketplace `.claude-plugin/marketplace.json`; not a workspace package) | `mods/frameshell/README.md`; `claude plugin validate mods/frameshell`, `claude plugin test mods/frameshell` |
 | Landing page frameshell.dev (Astro, own npm, Cloudflare Pages, hero video slot) | `website/README.md` |
 
 ## Shared truths (export + preview + engine + CLI; one source, never copy)
@@ -59,7 +60,7 @@ One owner per concept. Export, preview, engine and CLI import it. Change one: ru
 | Captions: presets, layering, face metrics | `packages/schema/src/subtitles.ts` (`captionTokens`, `styleCaptionTokens`: one decision for export + preview), `packages/schema/src/font-file.ts` (`parseFontMetrics`, never copy) | `apps/desktop/test/caption-style.test.ts` |
 | Spoken words + spelled numbers (aligner, take compare, live follower, voiceover) | `packages/schema/src/spoken.ts`, `packages/schema/src/numbers.ts` (`spellNumbersIn`); one source, never copy | |
 | Time references (TimeRef): seconds, markers, `beat:`/`bar:`, `word:` | `packages/core/src/timeline/time-ref.ts` + `TIME_REF_FIELDS` in `packages/protocol/src/timeline.ts`: one table of fields, never a private parser per verb (CLI `when()`, `music fit`, `sound place`, `voiceover place`, scene band planned range `readPlannedRange`) | |
-| Safe zones per platform | `packages/schema/src/safe-zones.ts`: one home, named never copied | |
+| Safe zones per platform | `packages/schema/src/safe-zones.ts`: one home, named never copied; `zoneInsets` = one scaling to a frame (review `safe` sheet + app preview overlay `preview/safe-zone.ts`) | `apps/desktop/test/safe-zone.test.ts` |
 | Cost text of paid runs | ONE `formatCost` in `packages/protocol/src/cost.ts`: core messages + app boxes, never a twin | |
 | JSON config edit keeping other bytes (Claude Desktop, Claude Code setup) | `packages/cli/src/config-file.ts` | |
 
@@ -77,7 +78,7 @@ One owner per concept. Export, preview, engine and CLI import it. Change one: ru
 - `skills/frameshell/` changed: run `pnpm gen:skill`, commit `packages/core/src/skills/core-skill.ts`. Drift test fails otherwise.
 - `packages/motion/` or `packages/schema/src/motion.ts` changed: run `pnpm gen:motion`, commit `plugins/hyperframes/src/motion-runtime.ts`. Drift test fails otherwise.
 - CLI command, flag or MCP tool added or renamed: update skill. `skill-docs.test.ts` fails on names that do not exist or commands skill misses.
-- Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*` or `website/` (own npm + lockfile, Node >= 22.22).
+- Workspace = `apps/*`, `packages/*`, `plugins/*` only. Never add `spikes/*` or `website/` (own npm + lockfile, Node >= 22.22), nor `mods/*` (Claude Code mods, run by Claude Code).
 - User-level storage: only via `resolveAppDirs()` (`packages/protocol/src/app-dirs.ts`). Downloads, caches, app state = `dataDir`; user decisions, global config = `configDir`. Overrides: `FRAMESHELL_DATA_DIR`, `FRAMESHELL_CONFIG_DIR` only.
 - New `CLAUDE.md`: under `<pkg>/src/`, `<pkg>/test/` or an app/plugin root, never in a dir that ships (package root, `skills/`, `plugins/*/skills/`, npm `files`). `node scripts/claude-md-check.mjs` checks placement + backticked paths (CI).
 

@@ -3,22 +3,22 @@
 
 import { HANDOFFS, type HandoffKind } from "../handoff.js";
 
-/** The CLI command that writes the file of `kind` and lists what it leaves out; `placeholder` is the language's word for "file". */
-function handoffCommand(kind: HandoffKind, placeholder = "file"): string {
-  // The dictionary parity test calls this with a sample string, not a kind.
-  const { cli, extension } = HANDOFFS[kind] ?? HANDOFFS.otio;
-  return `frameshell export ${cli} --out <${placeholder}>.${extension}`;
-}
-
 const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
+  /** Media dropped on an image project that is not a picture: imported, but no layer (#751). */
+  notLayers: (names: string) => `${names} stays in assets/ only: an image project stacks pictures (PNG, JPEG, GIF, WebP).`,
   /** An image project made from a frame opened in its own window (ADR 0017). */
   frameImageOpened: (name: string) => `Opened ${name} in a new window.`,
   /** The timeline saved as an editor hand-off file (ADR 0045, 0047), and how many things the file leaves out. */
   handoffExported: (name: string) => `Exported ${name}.`,
   handoffExportedWith: (name: string, count: number, kind: HandoffKind) =>
-    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run ${handoffCommand(kind)} in a terminal to list ${count === 1 ? "it" : "them"}.`,
+    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the ${HANDOFFS[kind]?.app ?? "editor"} file.`,
+  /** Opens the list of what an export left out (#749). */
+  noticeDetails: "Details",
+  noticeDetailsTitle: "What the file leaves out, one line each",
+  /** Shows a file the app just wrote in Finder / Explorer. */
+  showInFolder: "Show in folder",
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
@@ -32,6 +32,8 @@ const en = {
   askRead: (agent: string) => `${agent} read it`,
   askNotSent: (agent: string, reason: string) => `Not sent to ${agent}: ${reason}`,
   askCopied: "No agent to send to: the reference is on the clipboard.",
+  askConnect: "No AI is connected yet: the reference is on the clipboard. Connect your AI, then paste it in its chat.",
+  askCopiedNoAgent: "No agent is running: the reference is on the clipboard. Start one in the terminal, then paste it.",
   askPending: (agent: string, count: number) => `${agent}: ${count} waiting`,
   askPendingTitle: "References sent with Chat about this that the agent has not read yet",
   frameNotCaptured: (reason: string) => `Frame not captured: ${reason}`,
@@ -59,6 +61,7 @@ const en = {
   shoot: "Shoot",
   teleprompter: "Teleprompter",
   sidebarViews: "Sidebar views",
+  moreViews: (count: number) => `${count} more ${count === 1 ? "view" : "views"}`,
   inOwnWindow: (view: string) => `${view}, in its own window`,
   /** `name` is the panel's name as a sentence shows it (lower case in English). */
   dockBack: (name: string) => `Dock ${name} back`,
@@ -72,6 +75,9 @@ const en = {
   hide: "Hide",
   dontShowAgain: "Don't show again for this project",
   activeSessionTitle: "FRAMESHELL_SESSION of the active terminal",
+  setupSlowShort: "slow without a GPU",
+  setupSlow:
+    "On a computer without a GPU, loading the model and transcribing can take several minutes. A smaller model (Transcript view) is faster.",
   connectedAgents: (names: string) => `Agents: ${names}`,
   connectedAgentsTitle: "Agents connected to this project. Show the terminal panel (Cmd/Ctrl+\\).",
   agentSeek: (time: string) => `Agent moved the playhead to ${time}`,
@@ -88,15 +94,30 @@ const en = {
   nothing: "nothing",
   /** Joins the last two items of a list: "a, b and c". */
   and: "and",
+  /** A file-system failure, in words (#748); `path` may be empty. */
+  systemErrors: {
+    EACCES: (path: string) => `Frameshell may not write there${path ? `: ${path}` : ""}. Pick another folder or check its permissions.`,
+    EPERM: (path: string) => `Frameshell may not change that${path ? `: ${path}` : ""}. Pick another folder or check its permissions.`,
+    ENOTDIR: (path: string) => `Part of the path is a file, not a folder${path ? `: ${path}` : ""}. Pick a folder.`,
+    EEXIST: (path: string) => `Something with that name is already there${path ? `: ${path}` : ""}. Pick another name or folder.`,
+    ENOSPC: () => "The disk is full. Free some space, then try again.",
+    EROFS: (path: string) => `That disk is read-only${path ? `: ${path}` : ""}. Pick a folder on another disk.`,
+    ENOENT: (path: string) => `Not found${path ? `: ${path}` : ""}. It may have been moved or deleted.`,
+  },
+  dismissNotice: "Dismiss",
 };
 
 const es: typeof en = {
   imported: (names) => `Se importó ${names} a assets/.`,
   notMedia: (names) => `No es audio, video ni imagen: ${names}.`,
+  notLayers: (names) => `${names} queda solo en assets/: un proyecto de imagen apila imágenes (PNG, JPEG, GIF, WebP).`,
   frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
   handoffExported: (name) => `Se exportó ${name}.`,
   handoffExportedWith: (name, count, kind) =>
-    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta ${handoffCommand(kind, "archivo")} en una terminal para ${count === 1 ? "verla" : "verlas"}.`,
+    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo de ${HANDOFFS[kind]?.app ?? "el editor"}.`,
+  noticeDetails: "Ver detalles",
+  noticeDetailsTitle: "Lo que el archivo deja fuera, una línea por cosa",
+  showInFolder: "Mostrar en la carpeta",
   dropToImport: "Suelta para importar a assets/",
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,
@@ -110,6 +131,8 @@ const es: typeof en = {
   askRead: (agent) => `${agent} lo leyó`,
   askNotSent: (agent, reason) => `No se envió a ${agent}: ${reason}`,
   askCopied: "No hay un agente al que enviarlo: la referencia quedó en el portapapeles.",
+  askConnect: "Todavía no hay una IA conectada: la referencia quedó en el portapapeles. Conecta tu IA y pégala en su chat.",
+  askCopiedNoAgent: "No hay ningún agente abierto: la referencia quedó en el portapapeles. Inicia uno en la terminal y pégala.",
   askPending: (agent, count) => `${agent}: ${count} en espera`,
   askPendingTitle: "Referencias enviadas con Hablar de esto que el agente aún no leyó",
   frameNotCaptured: (reason) => `No se capturó el fotograma: ${reason}`,
@@ -136,6 +159,7 @@ const es: typeof en = {
   shoot: "Rodaje",
   teleprompter: "Teleprompter",
   sidebarViews: "Vistas de la barra lateral",
+  moreViews: (count) => (count === 1 ? "1 vista más" : `${count} vistas más`),
   inOwnWindow: (view) => `${view}, en su propia ventana`,
   dockBack: (name) => `Devolver ${name} a la ventana`,
   openInWindow: (name) => `Abrir ${name} en su propia ventana`,
@@ -146,6 +170,9 @@ const es: typeof en = {
   hide: "Ocultar",
   dontShowAgain: "No volver a mostrar para este proyecto",
   activeSessionTitle: "FRAMESHELL_SESSION de la terminal activa",
+  setupSlowShort: "lento sin GPU",
+  setupSlow:
+    "En una computadora sin GPU, cargar el modelo y transcribir puede tardar varios minutos. Un modelo más chico (vista Transcripción) es más rápido.",
   connectedAgents: (names) => `Agentes: ${names}`,
   connectedAgentsTitle: "Agentes conectados a este proyecto. Mostrar el panel de terminal (Cmd/Ctrl+\\).",
   agentSeek: (time) => `El agente movió el cursor de reproducción a ${time}`,
@@ -161,6 +188,16 @@ const es: typeof en = {
   timeRange: "un rango de tiempo",
   nothing: "nada",
   and: "y",
+  systemErrors: {
+    EACCES: (path) => `Frameshell no tiene permiso para escribir ahí${path ? `: ${path}` : ""}. Elige otra carpeta o revisa sus permisos.`,
+    EPERM: (path) => `Frameshell no tiene permiso para cambiar eso${path ? `: ${path}` : ""}. Elige otra carpeta o revisa sus permisos.`,
+    ENOTDIR: (path) => `Una parte de la ruta es un archivo, no una carpeta${path ? `: ${path}` : ""}. Elige una carpeta.`,
+    EEXIST: (path) => `Ya hay algo con ese nombre${path ? `: ${path}` : ""}. Elige otro nombre u otra carpeta.`,
+    ENOSPC: () => "El disco está lleno. Libera espacio y vuelve a intentarlo.",
+    EROFS: (path) => `Ese disco es de solo lectura${path ? `: ${path}` : ""}. Elige una carpeta en otro disco.`,
+    ENOENT: (path) => `No se encontró${path ? `: ${path}` : ""}. Puede que se haya movido o borrado.`,
+  },
+  dismissNotice: "Cerrar",
 };
 
 /** English and Spanish strings of the project window shell: status bar, sidebar, detached panels, drops. */

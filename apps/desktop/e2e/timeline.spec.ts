@@ -34,7 +34,7 @@ test("shows the project's tracks, top layer first", async () => {
   await expect(page.locator(".titlebar-project")).toHaveText("Timeline demo");
   await expect(lanes()).toHaveAttribute("data-revision", "0");
   await expect(page.locator(".track-head")).toHaveText(["V1Picture", "A1Voice"]);
-  await expect(page.locator(".timeline-empty")).toContainText("Ask the agent");
+  await expect(page.locator(".timeline-empty")).toContainText("Drag a video or sound from Files onto the timeline");
 });
 
 test("a clip added with the CLI in the terminal appears within 200 ms", async () => {

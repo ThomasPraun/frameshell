@@ -127,11 +127,13 @@ function normalized(vector: ArrayLike<number>): Float32Array {
 }
 
 /**
- * `frame` scaled down to `width`×`height` by averaging the source pixels each
- * target pixel covers (never up).
+ * `frame` scaled to exactly `width`×`height`: each target pixel averages the
+ * source pixels it covers, or repeats the nearest one where the target is
+ * larger. The detector needs its own size even when the picture is smaller
+ * (YuNet takes sides in multiples of 32: a 320×180 clip must become 320×192).
  */
-export function shrinkFrame(frame: BgrFrame, width: number, height: number): BgrFrame {
-  if (width >= frame.width && height >= frame.height) return frame;
+export function resizeFrame(frame: BgrFrame, width: number, height: number): BgrFrame {
+  if (width === frame.width && height === frame.height) return frame;
   const data = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y++) {
     const y0 = Math.floor((y * frame.height) / height);
@@ -326,7 +328,7 @@ export async function scanPeopleFaces(options: PeopleScanOptions): Promise<Peopl
   for await (const { time, frame } of sampleFaceFrames(options.ffmpeg, options.path, size)) {
     options.signal?.throwIfAborted();
     samples++;
-    const faces = await options.detect(shrinkFrame(frame, small.width, small.height));
+    const faces = await options.detect(resizeFrame(frame, small.width, small.height));
     await tracker.add(time, faces, async (face) => {
       const { landmarks } = face;
       if (!landmarks || landmarks.length !== ALIGN_TEMPLATE.length) return null;
