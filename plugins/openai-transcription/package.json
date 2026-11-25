@@ -1,7 +1,7 @@
 {
   "name": "@frameshell/openai-transcription",
   "version": "0.1.0",
-  "description": "Official Frameshell transcription provider: OpenAI whisper-1 with your own API key, word timestamps from the service.",
+  "description": "Official Frameshell transcription provider: OpenAI gpt-transcribe with your own API key, word times from whisper.cpp on your machine.",
   "license": "Apache-2.0",
   "author": "Frameshell contributors",
   "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/openai-transcription#readme",

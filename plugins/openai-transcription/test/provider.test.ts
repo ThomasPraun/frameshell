@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { TranscribeContext, TranscriptionProgress, TranscriptionProvider } from "@frameshell/plugin-api";
 import { scrub as speechScrub } from "../../openai-speech/src/provider.js";
-import { MODEL_PRICES, TIMING_NOTE, createOpenAiTranscriptionProvider, languageCode, pieceRanges, readPcm, scrub, timedWords, wavOf } from "../src/index.js";
+import { MODEL_PRICES, RETIREMENT_NOTE, TIMING_NOTE, createOpenAiTranscriptionProvider, languageCode, pieceRanges, readPcm, scrub, timedWords, wavOf } from "../src/index.js";
 
 // Seam under test: the `openai` transcription provider against a stub HTTP server on 127.0.0.1. The real API is
 // never called and no real key exists here: KEY is a distinctive fake that must appear nowhere but the stub's request.
@@ -89,16 +89,24 @@ function audio(seconds: number, quiet: [number, number][] = []): string {
   return file;
 }
 
-function context() {
+/** Host context; `timesText` as a host with ADR 0046 decision 11 sets it, unless `old`. */
+function context(old = false) {
   const progress: TranscriptionProgress[] = [];
-  const ctx: TranscribeContext = { ensureBinary: async () => "", ensureModel: async () => "", progress: (update) => progress.push(update) };
+  const ctx: TranscribeContext = {
+    ensureBinary: async () => "",
+    ensureModel: async () => "",
+    progress: (update) => progress.push(update),
+    ...(old ? {} : { timesText: true }),
+  };
   return { ctx, progress };
 }
 
+const W1 = { model: "whisper-1" } as const;
+
 /** Run a transcription that must fail; the message, plus every progress report, must be free of the key. */
-async function failure(p: TranscriptionProvider, file = audio(1), model?: string): Promise<string> {
-  const { ctx, progress } = context();
-  const error = await p.transcribe(file, model ? { model } : {}, ctx).then(() => Promise.reject(new Error("expected a failure")), (e: unknown) => e as Error);
+async function failure(p: TranscriptionProvider, file = audio(1), model = "whisper-1", old = false): Promise<string> {
+  const { ctx, progress } = context(old);
+  const error = await p.transcribe(file, { model }, ctx).then(() => Promise.reject(new Error("expected a failure")), (e: unknown) => e as Error);
   const everything = JSON.stringify([error.message, error.stack?.split("\n")[0], Object.entries(error), progress]);
   expect(everything).not.toContain(KEY);
   expect(everything).not.toMatch(/FAKEKEY/);
@@ -107,29 +115,68 @@ async function failure(p: TranscriptionProvider, file = audio(1), model?: string
 }
 
 describe("the provider's declaration", () => {
-  it("is remote, has an estimate and no `free`, and lists whisper-1 only", () => {
+  it("is remote, has an estimate and no `free`, defaults to text-only gpt-transcribe and keeps whisper-1", () => {
     const p = provider();
     expect(p.id).toBe("openai");
     expect(p.remote).toBe(true);
     expect(p.free).toBeUndefined();
-    expect(p.models).toEqual([{ id: "whisper-1" }]);
-    expect(p.defaultModel).toBe("whisper-1");
-    expect(Object.keys(MODEL_PRICES)).toEqual(["whisper-1"]);
+    expect(p.models).toEqual([{ id: "gpt-transcribe", textOnly: true }, { id: "whisper-1" }]);
+    expect(p.defaultModel).toBe("gpt-transcribe");
+    expect(Object.keys(MODEL_PRICES)).toEqual(["gpt-transcribe", "whisper-1"]);
   });
 
   it("prices audio by the minute and refuses a model without a price", async () => {
     const p = provider();
     const priced = await p.estimate!({ seconds: 90 }, {});
     expect(priced).toMatchObject({ currency: "USD", minutes: 1.5 });
-    expect(priced.cost).toBeCloseTo(0.009, 10);
-    expect(() => p.estimate!({ seconds: 90 }, { model: "gpt-4o-transcribe" })).toThrow(/only with whisper-1.*--model whisper-1/);
+    expect(priced.cost).toBeCloseTo(0.00675, 10);
+    expect((await p.estimate!({ seconds: 90 }, W1)).cost).toBeCloseTo(0.009, 10);
+    expect(() => p.estimate!({ seconds: 90 }, { model: "gpt-4o-transcribe" })).toThrow(/only with gpt-transcribe or whisper-1.*--model gpt-transcribe/);
   });
 });
 
-describe("transcribe", () => {
-  it("uploads the WAV with whisper-1, verbose_json and word timestamps, the key in the header only", async () => {
+describe("transcribe with gpt-transcribe", () => {
+  const TEXT = { text: "Hola, mundo. ¿Qué tal?", languages: [{ code: "es" }], usage: { type: "duration", seconds: 2 } };
+
+  it("uploads the WAV with `languages[]` and a json answer, and returns the text with no words", async () => {
+    replies = [answer(TEXT)];
     const { ctx, progress } = context();
     const result = await provider().transcribe(audio(2), { language: "es-AR" }, ctx);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ authorization: `Bearer ${KEY}`, fields: { model: "gpt-transcribe", response_format: "json", "languages[]": "es" }, seconds: 2 });
+    expect(Object.keys(seen[0]!.fields).sort()).toEqual(["languages[]", "model", "response_format"]);
+    expect(result).toEqual({ model: "gpt-transcribe", language: "es", words: [], text: "Hola, mundo. ¿Qué tal?" });
+    expect(JSON.stringify(progress)).not.toContain(KEY);
+  });
+
+  it("reports the language the service heard, joins the text of long audio, and carries the text before as the prompt", async () => {
+    replies = [answer({ text: " Uno. ", languages: [{ code: "ES" }] }), answer({ text: "Dos.", languages: [] })];
+    const { ctx } = context();
+    const result = await provider(undefined, { pieceSeconds: 10 }).transcribe(audio(16, [[7.5, 8.5]]), { prompt: "Antes." }, ctx);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]!.fields.prompt).toBe("Antes.");
+    expect(seen[0]!.fields["languages[]"]).toBeUndefined();
+    expect(seen[1]!.fields.prompt).toBe("Uno.");
+    expect(result).toEqual({ model: "gpt-transcribe", language: "es", words: [], text: "Uno. Dos." });
+  });
+
+  it("refuses, before sending anything, on a host that cannot time text", async () => {
+    expect(await failure(provider(), audio(1), "gpt-transcribe", true)).toMatch(/cannot time it on this machine: update Frameshell, or pass `--model whisper-1` until 2027-02-26/);
+    expect(seen).toEqual([]);
+  });
+
+  it("fails on an answer without text, and names whisper.cpp as the way out once gpt-transcribe is gone", async () => {
+    replies = [answer({ languages: [] })];
+    expect(await failure(provider(), audio(1), "gpt-transcribe")).toBe("OpenAI answered without the text");
+    replies = [status(404, { error: { message: "gone", code: "model_not_found" } })];
+    expect(await failure(provider(), audio(1), "gpt-transcribe")).toMatch(/no longer serves the model "gpt-transcribe".*Update @frameshell\/openai-transcription or use `--provider whisper-cpp`/);
+  });
+});
+
+describe("transcribe with whisper-1", () => {
+  it("uploads the WAV with whisper-1, verbose_json and word timestamps, the key in the header only", async () => {
+    const { ctx, progress } = context();
+    const result = await provider().transcribe(audio(2), { language: "es-AR", ...W1 }, ctx);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({
       url: "/v1/audio/transcriptions",
@@ -141,7 +188,7 @@ describe("transcribe", () => {
     expect(result).toEqual({
       model: "whisper-1",
       language: "es",
-      notes: [TIMING_NOTE],
+      notes: [TIMING_NOTE, RETIREMENT_NOTE],
       words: [
         { text: "Hola,", start: 0.2, end: 0.5 },
         { text: "mundo.", start: 0.6, end: 1.1 },
@@ -154,7 +201,7 @@ describe("transcribe", () => {
 
   it("reports the language the service heard as a code, and passes a host prompt on", async () => {
     const { ctx } = context();
-    const result = await provider().transcribe(audio(1), { prompt: "Antes dijo esto." }, ctx);
+    const result = await provider().transcribe(audio(1), { prompt: "Antes dijo esto.", ...W1 }, ctx);
     expect(result.language).toBe("es");
     expect(seen[0]!.fields.prompt).toBe("Antes dijo esto.");
     expect(seen[0]!.fields.language).toBeUndefined();
@@ -163,7 +210,7 @@ describe("transcribe", () => {
   it("cuts long audio at a pause into pieces, shifts their words back, and carries the text before as the prompt", async () => {
     replies = [answer({ text: "Uno.", words: [{ word: "Uno", start: 1, end: 1.5 }] }), answer({ text: "Dos.", words: [{ word: "Dos", start: 0.5, end: 0.9 }] })];
     const { ctx, progress } = context();
-    const result = await provider(undefined, { pieceSeconds: 10 }).transcribe(audio(16, [[7.5, 8.5]]), {}, ctx);
+    const result = await provider(undefined, { pieceSeconds: 10 }).transcribe(audio(16, [[7.5, 8.5]]), W1, ctx);
     expect(seen).toHaveLength(2);
     expect(seen[0]!.seconds).toBeGreaterThan(7.5);
     expect(seen[0]!.seconds).toBeLessThan(8.5);
@@ -177,7 +224,7 @@ describe("transcribe", () => {
   });
 
   it("refuses another model and a missing key before sending anything", async () => {
-    expect(await failure(provider(), audio(1), "gpt-4o-transcribe")).toMatch(/only with whisper-1/);
+    expect(await failure(provider(), audio(1), "gpt-4o-transcribe")).toMatch(/only with gpt-transcribe or whisper-1/);
     for (const env of [{}, { OPENAI_API_KEY: "" }, { OPENAI_API_KEY: "   " }]) {
       expect(await failure(provider(env))).toBe("OPENAI_API_KEY is not set");
     }
@@ -186,7 +233,7 @@ describe("transcribe", () => {
 
   it("takes the server address from FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL and refuses one that is not http", async () => {
     const { ctx } = context();
-    await createOpenAiTranscriptionProvider({ env: { OPENAI_API_KEY: KEY, FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL: `${base}/` } }).transcribe(audio(1), {}, ctx);
+    await createOpenAiTranscriptionProvider({ env: { OPENAI_API_KEY: KEY, FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL: `${base}/` } }).transcribe(audio(1), W1, ctx);
     expect(seen[0]!.url).toBe("/v1/audio/transcriptions");
     const bad = createOpenAiTranscriptionProvider({ env: { OPENAI_API_KEY: KEY, FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL: "ftp://x" } });
     expect(await failure(bad)).toMatch(/must start with http/);
@@ -211,7 +258,7 @@ describe("transcribe", () => {
   it("retries a 429 or 5xx once, then explains it", async () => {
     replies = [status(429, { error: { message: "slow down" } }), answer()];
     const { ctx } = context();
-    expect((await provider().transcribe(audio(1), {}, ctx)).words).toHaveLength(4);
+    expect((await provider().transcribe(audio(1), W1, ctx)).words).toHaveLength(4);
     expect(seen).toHaveLength(2);
     seen = [];
     replies = [status(500, "upstream exploded")];
@@ -235,7 +282,7 @@ describe("transcribe", () => {
       const message = await failure(provider());
       expect(message).toContain('no longer serves the model "whisper-1"');
       expect(message).toContain(`HTTP ${code}`);
-      expect(message).toContain("Update @frameshell/openai-transcription or use `--provider whisper-cpp`");
+      expect(message).toContain("Use `--model gpt-transcribe` (the default), update @frameshell/openai-transcription, or use `--provider whisper-cpp`");
       expect(message).toContain("[key]");
       expect(message).not.toMatch(/sk-live/);
       expect(seen).toHaveLength(1);

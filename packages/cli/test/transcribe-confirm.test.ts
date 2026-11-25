@@ -88,11 +88,11 @@ afterAll(async () => {
 
 describe("frameshell transcribe with a cloud provider", () => {
   it("refuses with the upload and cost, prints the confirming command, and transcribes when it is run", async () => {
-    const refused = await frameshell(["transcribe", "assets/voice.mp4", "--provider", "openai", "--language", "es"]);
+    const refused = await frameshell(["transcribe", "assets/voice.mp4", "--provider", "openai", "--model", "whisper-1", "--language", "es"]);
     expect(refused.code).toBe(1);
     expect(refused.stderr).toMatch(/uploads its audio \(0:02 of audio\) to that service and costs about 0\.0002 USD/);
     const printed = /Once the person confirmed: (frameshell transcribe .*)$/m.exec(refused.stderr)?.[1];
-    expect(printed).toMatch(/^frameshell transcribe assets\/voice\.mp4 --provider openai --language es --yes --confirmation [0-9a-f]{32}$/);
+    expect(printed).toMatch(/^frameshell transcribe assets\/voice\.mp4 --provider openai --model whisper-1 --language es --yes --confirmation [0-9a-f]{32}$/);
     expect(uploads).toBe(0);
 
     const confirmed = await frameshell(printed!.split(" ").slice(1));

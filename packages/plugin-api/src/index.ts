@@ -581,6 +581,13 @@ export interface TranscribeContext {
   userModel?(id: string, formats: readonly ModelFormat[]): Promise<UserModel>;
   /** Report progress to whoever waits (CLI stderr, app). Cheap; call freely. */
   progress(update: TranscriptionProgress): void;
+  /**
+   * `true` when this host times a {@link TranscriptionResult.text} itself (ADR 0046 decision 11): a model listed with
+   * {@link ProviderModel.textOnly} may then answer with text and no words. Absent on hosts older than this API
+   * addition: such a host would write a transcript with no words, so refuse a text-only model there and say to update
+   * Frameshell.
+   */
+  readonly timesText?: boolean;
 }
 
 /** One progress report. */
@@ -607,6 +614,13 @@ export interface ProviderModel {
   id: string;
   /** Host-managed model file behind it (see {@link TranscribeContext.ensureModel}), for its size and download state. */
   managedModel?: string;
+  /**
+   * `true` for a model that hears the words but gives no times for them (ADR 0046 decision 11). Its result carries
+   * {@link TranscriptionResult.text} and no words; the host transcribes the same audio with whisper.cpp on this
+   * machine first and lays the text over those timed words. Only hosts with {@link TranscribeContext.timesText} read
+   * it.
+   */
+  textOnly?: boolean;
 }
 
 /** What a provider accepts as a registered model, for model pickers. */
@@ -642,8 +656,13 @@ export interface TranscriptionResult {
   notes?: string[];
   /** Language actually used or detected. */
   language?: string;
-  /** In time order. */
+  /** In time order. Empty when the result carries {@link text} instead. */
   words: TranscriptWord[];
+  /**
+   * The whole transcript as plain text, for a {@link ProviderModel.textOnly} model: spelling, case and punctuation
+   * as heard, no times. The host times it (ADR 0046 decision 11) and ignores `words`. Absent for every other model.
+   */
+  text?: string;
   /** Compute device used, e.g. `metal`, `cuda`, `cpu`; for reports only. */
   device?: string;
 }

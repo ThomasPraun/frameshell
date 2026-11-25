@@ -97,6 +97,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Cloud transcription after `whisper-1` (#702, ADR 0046 decision 11, decisions 6 and 7 amended; no protocol change,
+  `PROTOCOL_VERSION` stays): `@frameshell/openai-transcription` now defaults to OpenAI's `gpt-transcribe`, which gives
+  text without word times, and keeps `--model whisper-1` until OpenAI retires it on 2027-02-26 (its results say so).
+  For a text-only model, `transcribe` loads `whisper-cpp` with this machine's default model before the ask (a missing
+  engine fails before anything is confirmed or uploaded), transcribes the audio locally first, asks the provider once
+  and lays its text over the local words with one aligner, `timeText` (`packages/core/src/transcripts/text-timing.ts`):
+  spelling, case and punctuation from the cloud, times from whisper.cpp, words that match nothing (`20` heard as
+  `veinte`) timed between their neighbours. `warnings` says where the times come from and how many words matched; the
+  ask says whisper-cpp times the words instead of "plus short re-checks". Plugin API: `ProviderModel.textOnly`,
+  `TranscriptionResult.text` and `TranscribeContext.timesText` (all optional); the plugin refuses `gpt-transcribe` on a
+  host without `timesText` and names `--model whisper-1`. The retired-model error names `--model gpt-transcribe`.
+  `gpt-transcribe` is priced at $0.0045 a minute from an independent guide: OpenAI's pricing page does not list it yet.
 - Timeline by hand (#747): track headers show sound and picture switches that mute and hide the track with one
   click (lit while on; the header menu still has them); "Zoom to fit" and the 0 key fit the clips themselves, so a
   10 s video fills the panel instead of a sixth of it (the panel still opens on at least a minute); Ctrl+wheel past
@@ -158,7 +170,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`; neither shows through `%APPDATA%`, so the card said
   it was not installed and refused Connect. Once Open has found and started an app, its card no longer says the app is
   not installed (#735).
-
+- Open ChatGPT in Connect your AI on a Mac finds OpenAI's ChatGPT.app by its bundle id (`com.openai.codex` since
+  OpenAI merged Codex into it, `com.openai.chat` before), and only then by name, so a browser web app or another
+  app named ChatGPT is not opened by mistake (#795).
+- Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
+- HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
+  The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
+  earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
+  `frameshell.json` now write one, as every project has; the whole real suite passes in a container (756 tests).
+- Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
+  instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
+  agent there, as ADR 0048 says (#791).
+- The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
+  cloud container), as the producer's renders already do; before, they failed there before drawing anything.
+- Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
+  it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
+  disappear under a running ffmpeg or Chrome (#790).
+- The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
+  with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
+  `model add` counts as already on disk (#789).
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
   "Revertir «Mover clip»", the timeline's change legend names the entry and gives way to the counts, and a terminal
   session's id moves to the author's tooltip. The app's own journal labels ("Move clip", "Apply look", "Delete 2 clips")

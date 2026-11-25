@@ -137,7 +137,7 @@ export const MusicPresetSchema = z.enum(MUSIC_PRESETS);
 
 /**
  * Tempo (BPM) and chords (one per bar, repeating) a preset plays when the caller names none; `swing` delays every
- * odd 16th by that fraction of a 16th. Numbers from the owner's notes (minimal has none: 110 BPM is ours).
+ * odd 16th by that fraction of a 16th. Numbers from the owner's notes, recorded in ADR 0038 (minimal has none: 110 BPM is ours).
  */
 export const MUSIC_PRESET_DEFAULTS: Readonly<Record<MusicPreset, { bpm: number; chords: readonly string[]; swing: number }>> = {
   synthwave: { bpm: 118, chords: ["Am", "F", "C", "G"], swing: 0 },
