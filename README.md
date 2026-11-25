@@ -69,6 +69,11 @@ To run from source: `pnpm install && pnpm build && pnpm --filter @frameshell/des
 - [MCP server](docs/mcp.md): drive a project from Claude Desktop, the ChatGPT desktop app, Claude Code or any MCP client.
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
+- [Code signing policy](CODE_SIGNING_POLICY.md) and [privacy policy](PRIVACY.md)
+
+## Code signing policy
+
+Windows builds: free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). Roles, how releases are signed and how to report a problem: [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md). Frameshell has no telemetry; what it sends and when: [PRIVACY.md](PRIVACY.md).
 
 ## License
 

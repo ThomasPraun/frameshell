@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { coreVersion } from "./version.js";
 import {
   type ConfigDoc,
   ErrorCode,
@@ -37,6 +38,8 @@ import {
   CREDITS_FILE,
   type CaptionPhrase,
   type DuckSettings,
+  type AnyClip,
+  type MediaClip,
   type MulticamGroup,
   type ProgramTrack,
   type FormatEntry,
@@ -54,7 +57,10 @@ import {
   parseProjectConfig,
   parseRequirementsFile,
   parseStyleFile,
+  parsePointerTrack,
+  isShotClip,
   parseTimeline,
+  pointerFileOf,
   projectFormats,
   resolveStyle,
   sameAspect,
@@ -100,6 +106,7 @@ import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
 import { planReframe, reframeTarget } from "./reframe.js";
+import { ZOOM, planZoom, screenShotOf } from "./zoom.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -121,6 +128,7 @@ import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
+import { TextFitChecker } from "./clips/text-fit.js";
 import { ClipVerifier } from "./clips/verify.js";
 import { buildCatalog } from "./plugins/catalog.js";
 import { PluginHost } from "./plugins/host.js";
@@ -170,6 +178,7 @@ import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
 import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { readTimelineWords } from "./transcripts/timeline-words.js";
+import { announceTranscription } from "./transcripts/announce.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -182,6 +191,7 @@ import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { readNestedFile, resolveNested } from "./timeline/nested.js";
+import { compareSound } from "./review/sound-diff.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { type VerifyServices, canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
@@ -198,13 +208,14 @@ import { requirementsConfigDocument, requirementsFromState, requirementsState } 
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
+import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
+import { ProvidedCredentials } from "./credentials.js";
 
-/** Package version reported in the handshake. */
-export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
-  .version;
+/** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
+export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -271,6 +282,11 @@ export interface DaemonOptions {
   txIdleGapMs?: number;
   /** Transaction clock in epoch ms (idle gaps, auto-commit deadlines). Default `Date.now`. Tests skew it to pass deadlines without waiting. */
   txNow?: () => number;
+  /**
+   * Environment `credentials.provide` writes secrets into and the plugins read them from (ADR 0050). Default
+   * `process.env`; tests pass a plain object so daemons in one process stay apart.
+   */
+  env?: Record<string, string | undefined>;
 }
 
 /** Running daemon handle. */
@@ -305,6 +321,12 @@ type Handlers = {
 };
 
 /**
+ * Methods `binaries.remove` does not wait for: the removal itself, the handshake, and the waits that only block on
+ * the person (they hold no download).
+ */
+const NOT_USING_DOWNLOADS: ReadonlySet<string> = new Set(["handshake", "binaries.remove", "proposal.wait", "inbox.wait"]);
+
+/**
  * Start frameshelld on `socketPath`.
  *
  * Rejects with code `EADDRINUSE` when a live daemon already owns the socket,
@@ -317,6 +339,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   const clients = new Set<Socket>();
+  /**
+   * Requests running now, on any connection, that may use a managed download (a frame capture, a clip check, an
+   * import's probe): every method but {@link NOT_USING_DOWNLOADS}. `binaries.remove` waits for them as for jobs.
+   */
+  let requestsRunning = 0;
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
   const encoderCache = new EncoderCache(binaries.dataDir);
@@ -1033,8 +1060,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
   });
+  const textFit = new TextFitChecker({
+    timeline: async (dir, id) => {
+      const { timeline, fps } = await timelines.load(dir, id);
+      return { timeline: await resolveNested(dir, timeline, undefined, fps), fps };
+    },
+    live: (dir, timeline, clip, props) => clips.live(clipRoot(dir), timeline, clip, props),
+    declaredProps: (dir, clip) => timelines.declaredProps(dir, clip),
+    resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
+    chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
+  });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
+  /** Runs of `transcribe` so far, for the ids of `transcription.progress`. */
+  let transcriptionRuns = 0;
   const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
     const key = canonicalPathSync(dir);
     transcriptions.set(key, (transcriptions.get(key) ?? 0) + 1);
@@ -1076,7 +1115,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             providerId,
             provider,
             model: await configuredModel(config, providerId),
-            language: config.transcription?.language,
+            // The project's language when set; else the script's own (#742), so whisper does not guess from a few seconds.
+            language: config.transcription?.language ?? scriptLanguage(await shoots.script(dir, script)) ?? undefined,
             context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);
@@ -1521,6 +1561,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   };
   /** Agent tags the app set per terminal session (`session.tag`), each with the connection that set it. */
   const sessionTags = new Map<string, { agent: string; owner: Caller }>();
+  /** Secrets the app handed over (`credentials.provide`), each with the connection that gave it. */
+  const credentials = new ProvidedCredentials<Caller>(options.env ?? process.env);
   /** Agent `caller`'s operations run under now: the one it named itself, else the app's tag of its session. */
   const agentOf = (caller: Caller): string | null => {
     if (caller.agent !== undefined) return caller.agent;
@@ -1684,6 +1726,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       else sessionTags.set(session, { agent, owner: caller });
       return {};
     },
+    "credentials.provide": async ({ name, value }, caller) => ({ source: credentials.provide(name, value, caller) }),
     status: async ({ cwd }, caller) => {
       const project = await projects.openEnclosing(cwd);
       let trust = null;
@@ -1731,9 +1774,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
     },
     "binaries.remove": async ({ name }) => {
-      // Jobs and transcriptions do not say which downloads they use, so any of them blocks a removal.
+      // Jobs, transcriptions and one-off requests do not say which downloads they use, so any of them blocks a removal.
       if (jobs.busy || clipJobs.busy || transcriptions.size > 0) {
         throw inUse(name, "busy", "Jobs or a transcription are running or queued and may use it. See `frameshell status`; remove it when they finish (`job cancel` stops one).");
+      }
+      if (requestsRunning > 0) {
+        throw inUse(name, "busy", "Another request is running and may use it (a frame capture, a clip check, an import). Try again once it finishes.");
       }
       return binaries.remove(name);
     },
@@ -1749,7 +1795,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
     "plugin.catalog": async ({ cwd }) => {
       const dir = await root(cwd);
-      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+      const config = (await readEnclosingProject(dir))?.config;
+      const registered = new Set((await models.list()).models.map((model) => model.id));
+      const chosenModel = async (provider: string) => {
+        const own = (config?.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER) === provider ? config?.transcription?.model : undefined;
+        const id = own ?? (await models.defaultFor(provider));
+        return id === undefined ? undefined : { id, registered: registered.has(id) };
+      };
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir), chosenModel, env: options.env ?? process.env });
     },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
@@ -1921,6 +1974,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const providerId = provider ?? config.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER;
       const overrides = { dir, binaries: config.binaries };
       const chosenModel = model ?? (await configuredModel(config, providerId));
+      // Every subscriber of the project sees this run, not only its caller (#742: a CLI run was invisible in the app).
+      const announcer = announceTranscription(
+        `t_${++transcriptionRuns}`,
+        relative(dir, resolve(cwd, asset)).split(sep).join("/"),
+        (update) => publishFor("transcription.progress", dir, { project: dir, ...update }),
+        request.progress,
+      );
       return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
@@ -1931,7 +1991,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
-        progress: request.progress,
+        progress: announcer.progress,
         yes,
         confirmation,
         // A text-only cloud model: whisper.cpp times its words here, with this machine's default model (ADR 0046 d11).
@@ -1940,7 +2000,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           providerId: DEFAULT_TRANSCRIPTION_PROVIDER,
           model: await models.defaultFor(DEFAULT_TRANSCRIPTION_PROVIDER),
         }),
-      }));
+      })).then(
+        (result) => {
+          announcer.end();
+          return result;
+        },
+        (error: unknown) => {
+          announcer.end(error);
+          throw error;
+        },
+      );
     },
     "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
@@ -2076,6 +2145,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return clips.status(clipRoot(dir), timeline, found === formats[0] ? undefined : found);
     },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
+    "clip.textFit": async ({ cwd, timeline, clip, props, at }) =>
+      textFit.check(clipRoot(await root(cwd)), { timeline, clip, ...(props ? { props } : {}), ...(at ? { at } : {}) }),
     "clip.verify": async ({ cwd, timeline, clip, probes, tolerance }) => clipVerifier.verify(clipRoot(await root(cwd)), { timeline, clip, probes, tolerance }),
     "grade.analyze": async ({ cwd, timeline, clip, at, from, to, samples, view }, caller) => {
       const dir = await root(cwd);
@@ -3148,6 +3219,126 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         tx: tx.id,
       };
     },
+    "clip.zoom": async ({ cwd, timeline, clip: clipId, scale: factor, pointer: pointerArg }, caller) => {
+      const dir = await root(cwd);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.zoom: ${reason}`, { op: "clip.zoom", reason, field });
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      // A Shoot screen shot (ADR 0049 decision 7): its screen file goes over the shot as a media clip, which is zoomed.
+      const screenShot = screenShotOf(loaded, clipId);
+      const clip: MediaClip | undefined =
+        screenShot?.clip ??
+        loaded.tracks
+          .flatMap((track) => (track.kind === "video" ? track.clips : []))
+          .find((candidate): candidate is MediaClip => candidate.id === clipId && isMediaClip(candidate));
+      if (!clip) {
+        const found = loaded.tracks.flatMap((track): AnyClip[] => ("clips" in track ? track.clips : [])).find((candidate) => candidate.id === clipId);
+        if (found && isShotClip(found)) {
+          throw invalid(
+            `shot ${clipId} is a ${found.shot} shot: only a \`screen\` shot, or a \`solo\` shot of a screen recording, is zoomed (the screen file goes over it). ` +
+              `Place the screen file as a media clip on a video track (frameshell clip add <track> <file> --start <s> --in <s> --out <s>) and zoom that clip.`,
+            "clip",
+          );
+        }
+        if (found) throw invalid(`clip ${clipId} is not a media clip: only screen recordings are zoomed.`, "clip");
+        throw new RpcError(ErrorCode.ClipNotFound, `clip.zoom: no clip "${clipId}" in timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      const probe = await media.probe(dir, clip.asset);
+      if (!probe.video || probe.video.still) throw invalid(`${clip.asset} has no moving picture to zoom.`, "clip");
+      if (!probe.video.width || !probe.video.height) throw invalid(`${clip.asset} has no readable picture size.`, "clip");
+      const pointerFile = pointerArg === undefined ? join(dir, ...pointerFileOf(clip.asset).split("/")) : resolve(cwd, pointerArg);
+      let pointerRel: string;
+      try {
+        pointerRel = (await resolveAsset(dir, pointerFile)).rel;
+      } catch (error) {
+        if (!(error instanceof RpcError) || error.code !== ErrorCode.AssetNotFound) throw error;
+        throw invalid(
+          pointerArg === undefined
+            ? `${clip.asset} has no pointer track (${pointerFileOf(clip.asset)}): only screens recorded in Shoot have one. Pass \`pointer\` to read another file of the same shape.`
+            : `${pointerArg} does not exist.`,
+          "pointer",
+        );
+      }
+      const parsed = parsePointerTrack(await readFile(join(dir, ...pointerRel.split("/")), "utf8").then((text) => JSON.parse(text) as unknown, () => null));
+      if (!parsed.ok) throw invalid(`${pointerRel} is not a pointer track: ${parsed.error}`, "pointer");
+      const speed = clip.speed ?? 1;
+      const config = (await readEnclosingProject(dir))?.config;
+      const project = config?.resolution ?? { width: 1920, height: 1080 };
+      const scale = factor ?? ZOOM.scale;
+      const base = { scale: clip.transform?.scale ?? 1, x: clip.transform?.x ?? 0, y: clip.transform?.y ?? 0 };
+      const plan = planZoom(
+        { source: { width: probe.video.width, height: probe.video.height }, project },
+        parsed.value.samples,
+        { from: clip.in, to: clip.out, toTimeline: (source) => clip.start + (source - clip.in) / speed },
+        { scale, base },
+      );
+      const warnings: string[] = [];
+      const nothing = (): MethodResult<"clip.zoom"> => ({
+        timeline,
+        revision: loaded.revision,
+        clip: clip.id,
+        pointer: pointerRel,
+        scale,
+        rests: plan.rests,
+        zooms: 0,
+        keys: 0,
+        operations: [],
+        tx: null,
+        warnings,
+      });
+      if (plan.keys.length === 0) {
+        warnings.push(
+          plan.rests === 0
+            ? `The pointer never rests in ${clip.id} (0.8 s or more in one spot), so it keeps its framing.`
+            : `The pointer rests only at the clip's edges, too briefly to zoom, so ${clip.id} keeps its framing.`,
+        );
+        return nothing();
+      }
+      if (!screenShot && (clip.keys?.x || clip.keys?.y || clip.keys?.scale)) warnings.push(`${clip.id} had its own x, y or scale keys: replaced.`);
+      // Every write joins one transaction, so one revert undoes the zoom even from a sessionless client.
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Zoom ${basename(clip.asset, extname(clip.asset))}` };
+      const author = journalAuthorOf(caller);
+      const written: string[] = [];
+      let revision = loaded.revision;
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        written.push(result.operation.id);
+        revision = result.revision;
+        return result;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      let target = clip.id;
+      try {
+        if (screenShot) {
+          // Muted: the group already plays every angle's sound under every shot.
+          const added = await apply({ op: "track.add", args: { kind: "video", name: "Screen zoom", index: screenShot.index + 1 } } as OperationRequest);
+          const placed = await apply({
+            op: "clip.add",
+            args: { track: added.changes.added[0]!, type: "media", asset: clip.asset, start: clip.start, in: clip.in, out: clip.out, muted: true },
+          } as OperationRequest);
+          target = placed.changes.added[0]!;
+          warnings.push(
+            `${clipId} is a shot of the multicam group: its screen file ${clip.asset} was placed over it as ${target} (muted, on a new video track "Screen zoom"), and ${target} is zoomed.`,
+          );
+        }
+        for (const prop of ["x", "y", "scale"] as const) {
+          if (!screenShot && clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: target, prop, clear: true } } as OperationRequest);
+        }
+        for (const prop of ["scale", "x", "y"] as const) {
+          for (const point of plan.keys) {
+            await apply({ op: "clip.key", args: { clip: target, prop, time: point.time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+          }
+        }
+      } catch (error) {
+        // All or nothing: take back what was written, in the same transaction.
+        for (const id of written.reverse()) await timelines.revert({ root: dir, cwd, timeline, author, tx, target: id }).catch(() => undefined);
+        throw error;
+      }
+      await settle(key, tx);
+      return { ...nothing(), clip: target, revision, zooms: plan.zooms, keys: plan.keys.length, operations: written, tx: tx.id };
+    },
     "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
@@ -3338,6 +3529,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         // A config-only target (ADR 0036) changed no clips.
         return { timeline, target, clips: [] };
       }
+    },
+    "history.sound": async ({ cwd, timeline, target }) => {
+      const dir = await root(cwd);
+      let states: Awaited<ReturnType<typeof timelines.statesAround>>;
+      try {
+        states = await timelines.statesAround(dir, timeline, target);
+      } catch (error) {
+        if (!(error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target)))) throw error;
+        const holding = await timelinesHolding(dir, target);
+        if (holding.length > 0) throw historyElsewhere(target, timeline, holding);
+        // A config-only target (ADR 0036) changed no sound.
+        return { timeline, target, tracks: [], unchanged: [], unheard: [] };
+      }
+      const { before, after, fps } = states;
+      const sound = await compareSound({
+        before: await resolveNested(dir, before, undefined, fps),
+        after: await resolveNested(dir, after, undefined, fps),
+        fps,
+        profile: (asset) => energy.profile(dir, asset),
+      });
+      return { timeline, target, ...sound };
     },
     revert: async ({ cwd, timeline, target }, caller) => {
       const dir = await root(cwd);
@@ -3733,6 +3945,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       closedConnection.abort();
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
+      credentials.drop(caller);
       targets.drop(caller);
       ui.drop(sink);
       clients.delete(socket);
@@ -3776,9 +3989,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           closed: closedConnection.signal,
         };
         const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
-        const result = await (idempotencyKey === null
-          ? handler(params, caller, context)
-          : replays.run(authorOf(caller), idempotencyKey, method, params, () => handler(params, caller, context)));
+        const counted = !NOT_USING_DOWNLOADS.has(method);
+        if (counted) requestsRunning++;
+        let result: unknown;
+        try {
+          result = await (idempotencyKey === null
+            ? handler(params, caller, context)
+            : replays.run(authorOf(caller), idempotencyKey, method, params, () => handler(params, caller, context)));
+        } finally {
+          if (counted) requestsRunning--;
+        }
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;

@@ -1,10 +1,31 @@
 import type { AssetInfo } from "@frameshell/protocol";
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n.js";
-import { dbText, matchGains, matchTarget, spectrogramColour } from "../audition/model.js";
-import { type AuditionResult, type AuditionState, auditionDialog, playKey } from "../audition/store.js";
-import { playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
+import {
+  dbText,
+  matchGains,
+  matchTarget,
+  spectrogramColour,
+} from "../audition/model.js";
+import {
+  type AuditionResult,
+  type AuditionState,
+  auditionDialog,
+  playKey,
+} from "../audition/store.js";
+import {
+  playVoice,
+  stopVoice,
+  usePlayingVoice,
+  voicePosition,
+} from "../people/voice-play.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useModal } from "./modal.js";
 
@@ -18,13 +39,24 @@ type Item = AuditionResult["items"][number];
  * the project window; a dialog opened from a detached panel's window is drawn there through a portal.
  */
 export function AuditionDialogHost({ mediaUrl }: { mediaUrl: string }) {
-  const state = useSyncExternalStore(auditionDialog.subscribe, auditionDialog.get);
+  const state = useSyncExternalStore(
+    auditionDialog.subscribe,
+    auditionDialog.get,
+  );
   if (!state) return null;
   const element = <AuditionDialog state={state} mediaUrl={mediaUrl} />;
-  return state.view === window ? element : createPortal(element, state.view.document.body);
+  return state.view === window
+    ? element
+    : createPortal(element, state.view.document.body);
 }
 
-function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: string }) {
+function AuditionDialog({
+  state,
+  mediaUrl,
+}: {
+  state: AuditionState;
+  mediaUrl: string;
+}) {
   const title = useId();
   const matchId = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -37,7 +69,10 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
   const gains = matchGains(lufs, state.match);
   const target = matchTarget(lufs);
   return (
-    <div className="voiceover-backdrop audition-backdrop" data-testid="audition-backdrop">
+    <div
+      className="voiceover-backdrop audition-backdrop"
+      data-testid="audition-backdrop"
+    >
       <div
         ref={box}
         className="voiceover-dialog audition-dialog"
@@ -51,9 +86,15 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
         <h2 id={title} className="voiceover-title">
           {said.title(state.files.length)}
         </h2>
-        {read.kind === "reading" && <p className="voiceover-note">{said.reading}</p>}
+        {read.kind === "reading" && (
+          <p className="voiceover-note">{said.reading}</p>
+        )}
         {read.kind === "failed" && (
-          <section className="voiceover-section" role="alert" data-testid="audition-failed">
+          <section
+            className="voiceover-section"
+            role="alert"
+            data-testid="audition-failed"
+          >
             <h3 className="voiceover-heading">{said.failed}</h3>
             <p className="voiceover-error">{read.message}</p>
           </section>
@@ -68,23 +109,46 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
                   data-testid="audition-match"
                   checked={state.match}
                   disabled={target === null}
-                  onChange={(event) => auditionDialog.setMatch(event.target.checked)}
+                  onChange={(event) =>
+                    auditionDialog.setMatch(event.target.checked)
+                  }
                 />
                 {said.matchLabel}
               </label>
               <p className="voiceover-hint" data-testid="audition-match-note">
-                {target === null ? said.matchNone : state.match ? said.matchOn(dbText(target)) : said.matchOff}
+                {target === null
+                  ? said.matchNone
+                  : state.match
+                    ? said.matchOn(dbText(target))
+                    : said.matchOff}
               </p>
             </div>
             <ul className="audition-rows">
               {items.map((item, index) => (
-                <Row key={item.asset} item={item} gain={gains[index]!} matched={state.match} asset={assets?.get(item.asset)} mediaUrl={mediaUrl} onFailed={setError} />
+                <Row
+                  key={item.asset}
+                  item={item}
+                  gain={gains[index]!}
+                  matched={state.match}
+                  asset={assets?.get(item.asset)}
+                  mediaUrl={mediaUrl}
+                  onFailed={setError}
+                  mix={
+                    state.mix
+                      ? state.inMix === item.asset
+                        ? "playing"
+                        : "ready"
+                      : null
+                  }
+                />
               ))}
             </ul>
             {read.result.skipped.length > 0 && (
               <ul className="voiceover-warnings" data-testid="audition-skipped">
                 {read.result.skipped.map((skip) => (
-                  <li key={skip.asset}>{said.skipped(nameOf(skip.asset), skip.reason)}</li>
+                  <li key={skip.asset}>
+                    {said.skipped(nameOf(skip.asset), skip.reason)}
+                  </li>
                 ))}
               </ul>
             )}
@@ -96,7 +160,11 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
           </p>
         )}
         <div className="voiceover-actions">
-          <button className="button" data-testid="audition-close" onClick={() => auditionDialog.close()}>
+          <button
+            className="button"
+            data-testid="audition-close"
+            onClick={() => auditionDialog.close()}
+          >
             {said.close}
           </button>
         </div>
@@ -107,6 +175,14 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
 
 const nameOf = (path: string) => path.split("/").pop() ?? path;
 
+/** Seconds as `M:SS.s`, a sound's length and playhead. */
+function clockText(seconds: number): string {
+  const tenths = Math.max(0, Math.round(seconds * 10));
+  const minutes = Math.floor(tenths / 600);
+  const rest = (tenths % 600) / 10;
+  return `${minutes}:${rest < 10 ? "0" : ""}${rest.toFixed(1)}`;
+}
+
 function Row({
   item,
   gain,
@@ -114,6 +190,7 @@ function Row({
   asset,
   mediaUrl,
   onFailed,
+  mix,
 }: {
   item: Item;
   /** Playback gain, dB. */
@@ -122,6 +199,8 @@ function Row({
   asset: AssetInfo | undefined;
   mediaUrl: string;
   onFailed: (message: string | null) => void;
+  /** Music candidates (#803): "Play in the mix", playing this one or not; null for other sounds. */
+  mix: "playing" | "ready" | null;
 }) {
   const key = playKey(item.asset);
   const playing = usePlayingVoice() === key;
@@ -129,8 +208,47 @@ function Row({
   const ready = Boolean(asset?.sidecar);
   const label = playing ? said.stop(name) : said.play(name);
   const { take } = item;
+  const duration = item.duration;
+  const row = useRef<HTMLLIElement>(null);
+  /** Source second playing, for the playhead; null while this row is silent. */
+  const [at, setAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!playing) {
+      setAt(null);
+      return;
+    }
+    // rAF of the window the row is in: the dialog may be in a detached panel's window (ADR 0012).
+    const view = row.current?.ownerDocument.defaultView ?? window;
+    let frame = 0;
+    const tick = () => {
+      setAt(voicePosition(key));
+      frame = view.requestAnimationFrame(tick);
+    };
+    frame = view.requestAnimationFrame(tick);
+    return () => view.cancelAnimationFrame(frame);
+  }, [playing, key]);
+  /** Play from source second `start`, stopping what plays. */
+  const play = (start: number, view: Window) => {
+    if (!asset) return;
+    onFailed(null);
+    auditionDialog.rowPlays();
+    // Without a known length the range runs to the end of the sidecar (the server clamps it).
+    playVoice(
+      key,
+      asset,
+      { start, end: duration ?? 3600 },
+      mediaUrl,
+      view as typeof window,
+      gain,
+    ).catch((error: Error) => onFailed(said.notPlayed(error.message)));
+  };
   return (
-    <li className="audition-row" data-testid="audition-row" data-asset={item.asset}>
+    <li
+      ref={row}
+      className="audition-row"
+      data-testid="audition-row"
+      data-asset={item.asset}
+    >
       <button
         className="icon-button audition-play"
         data-testid="audition-play"
@@ -140,15 +258,15 @@ function Row({
         data-tip={ready ? label : said.preparing}
         onClick={(event) => {
           if (playing) return stopVoice();
-          if (!asset) return;
-          onFailed(null);
-          const view = event.currentTarget.ownerDocument.defaultView ?? window;
-          // Without a known length the range runs to the end of the sidecar (the server clamps it).
-          playVoice(key, asset, { start: 0, end: item.duration ?? 3600 }, mediaUrl, view, gain).catch((error: Error) => onFailed(said.notPlayed(error.message)));
+          play(0, event.currentTarget.ownerDocument.defaultView ?? window);
         }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
-          {playing ? <rect x="4.5" y="4.5" width="7" height="7" fill="currentColor" /> : <path d="M5 3.5V12.5L12.5 8Z" fill="currentColor" />}
+          {playing ? (
+            <rect x="4.5" y="4.5" width="7" height="7" fill="currentColor" />
+          ) : (
+            <path d="M5 3.5V12.5L12.5 8Z" fill="currentColor" />
+          )}
         </svg>
       </button>
       <div className="audition-body">
@@ -158,22 +276,84 @@ function Row({
           </span>
           {take && (
             <span className="audition-take" data-testid="audition-take">
-              {take.kind === "music" ? said.musicTake(take.preset ?? "", take.bpm ?? 0, take.seed) : said.sfxTake(take.kind, take.variant ?? 1, take.seed)}
+              {take.kind === "music"
+                ? said.musicTake(take.preset ?? "", take.bpm ?? 0, take.seed)
+                : said.sfxTake(take.kind, take.variant ?? 1, take.seed)}
             </span>
           )}
           <span className="audition-level" data-testid="audition-lufs">
             {item.lufs === null ? said.silent : said.lufs(dbText(item.lufs))}
             {item.truePeak !== null && ` · ${said.peak(dbText(item.truePeak))}`}
           </span>
+          {duration !== null && (
+            <span className="audition-duration" data-testid="audition-duration">
+              {at !== null
+                ? `${clockText(Math.min(at, duration))} / ${clockText(duration)}`
+                : clockText(duration)}
+            </span>
+          )}
           {matched && (
             <span className="audition-gain" data-testid="audition-gain">
               {said.gain(dbText(gain))}
             </span>
           )}
         </div>
-        {item.spectrogram && <SpectrogramView picture={item.spectrogram} label={said.spectrogram(name)} />}
+        {item.spectrogram && (
+          // Click to play from there (#757); the line shows where it plays.
+          <div
+            className="audition-scrub"
+            data-testid="audition-scrub"
+            data-tip={ready && duration ? said.seekHint : undefined}
+            onClick={(event) => {
+              if (!ready || !duration) return;
+              const box = event.currentTarget.getBoundingClientRect();
+              const fraction = Math.min(
+                1,
+                Math.max(
+                  0,
+                  (event.clientX - box.left) / Math.max(1, box.width),
+                ),
+              );
+              play(
+                fraction * duration,
+                event.currentTarget.ownerDocument.defaultView ?? window,
+              );
+            }}
+          >
+            <SpectrogramView
+              picture={item.spectrogram}
+              label={said.spectrogram(name)}
+            />
+            {at !== null && duration ? (
+              <span
+                className="audition-playhead"
+                data-testid="audition-playhead"
+                style={{ left: `${Math.min(100, (at / duration) * 100)}%` }}
+              />
+            ) : null}
+          </div>
+        )}
       </div>
-      <button className="button" data-testid="audition-use" data-tip={said.useHint} onClick={() => auditionDialog.use(item.asset)}>
+      {mix && (
+        <button
+          className="button"
+          data-testid="audition-in-mix"
+          data-playing={mix === "playing"}
+          data-tip={said.inMixHint}
+          onClick={() => {
+            if (playing) stopVoice();
+            auditionDialog.playInMix(item.asset);
+          }}
+        >
+          {mix === "playing" ? said.stopInMix : said.playInMix}
+        </button>
+      )}
+      <button
+        className="button"
+        data-testid="audition-use"
+        data-tip={said.useHint}
+        onClick={() => auditionDialog.use(item.asset)}
+      >
         {said.use}
       </button>
     </li>
@@ -181,7 +361,13 @@ function Row({
 }
 
 /** A spectrogram painted one pixel a cell, low frequencies at the bottom; CSS stretches it to the row. */
-function SpectrogramView({ picture, label }: { picture: NonNullable<Item["spectrogram"]>; label: string }) {
+function SpectrogramView({
+  picture,
+  label,
+}: {
+  picture: NonNullable<Item["spectrogram"]>;
+  label: string;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
@@ -203,5 +389,13 @@ function SpectrogramView({ picture, label }: { picture: NonNullable<Item["spectr
     });
     context.putImageData(image, 0, 0);
   }, [picture]);
-  return <canvas ref={canvas} className="audition-spectrogram" data-testid="audition-spectrogram" role="img" aria-label={label} />;
+  return (
+    <canvas
+      ref={canvas}
+      className="audition-spectrogram"
+      data-testid="audition-spectrogram"
+      role="img"
+      aria-label={label}
+    />
+  );
 }

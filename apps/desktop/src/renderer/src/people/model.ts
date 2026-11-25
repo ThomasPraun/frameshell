@@ -132,7 +132,12 @@ export interface LinkChoice {
  * Voices and angles nobody has: every speaker of every transcript, or the whole transcript when it names none,
  * and every angle of every multicam group of `view`; minus what a person already holds or what a whole-transcript link covers.
  */
-export function linkChoices(sources: readonly TranscriptSource[], view: TimelineView | null, people: readonly PersonInfo[]): LinkChoice[] {
+export function linkChoices(
+  sources: readonly TranscriptSource[],
+  view: TimelineView | null,
+  people: readonly PersonInfo[],
+  nameOf: (path: string) => string = (path) => fileLabel(path).name,
+): LinkChoice[] {
   const taken = new Set<string>();
   const whole = new Set<string>();
   for (const person of people) {
@@ -148,7 +153,7 @@ export function linkChoices(sources: readonly TranscriptSource[], view: Timeline
     const speakers = transcript.speakers ?? [];
     if (speakers.length === 0) {
       if (!taken.has(speakerLinkKey({ transcript: path }))) {
-        choices.push({ key: `voice:${path}`, kind: "voice", label: path.replace(/^transcripts\//, ""), group: path, target: { speaker: { transcript: path } } });
+        choices.push({ key: `voice:${path}`, kind: "voice", label: nameOf(path), group: path, target: { speaker: { transcript: path } } });
       }
       continue;
     }
@@ -165,6 +170,21 @@ export function linkChoices(sources: readonly TranscriptSource[], view: Timeline
     }
   }
   return choices;
+}
+
+/** A shoot session folder, `shoot/<yyyymmdd>-<hhmmss>/`, anywhere in a path. */
+const SHOOT_SESSION = /(?:^|\/)shoot\/\d{8}-(\d{2})(\d{2})\d{2}\//;
+
+/**
+ * How a person reads a project file in People (a transcript, an asset, a script): its name without folder or
+ * extensions (`transcripts/camera-a.words.json` → `camera-a`), and for a recorded take the time its shoot started
+ * as `HH:MM` (`shoot/20261120-154402/mic.words.json` → `mic`, `15:44`), else null.
+ */
+export function fileLabel(path: string): { name: string; recorded: string | null } {
+  const file = path.split("/").pop() ?? path;
+  const name = file.replace(/\.words\.json$/, "").replace(/(.)\.[^.]+$/, "$1");
+  const shoot = SHOOT_SESSION.exec(path);
+  return { name, recorded: shoot ? `${shoot[1]}:${shoot[2]}` : null };
 }
 
 /** Name of speaker `id` in the transcript at `path`, else the id itself. */

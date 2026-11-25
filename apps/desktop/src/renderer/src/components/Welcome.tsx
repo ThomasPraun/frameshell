@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
+import { isImagePath } from "../../../shared/image-files.js";
+import { downloadSize } from "../../../shared/sizes.js";
 import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 import { ConnectAiButton } from "./ConnectAi.js";
 import { contextMenu } from "./ContextMenu.js";
 import { NewFromIdea } from "./NewFromIdea.js";
 
 /**
  * First screen of a window with no project: start from a video, audio or image file, or from an idea with no footage,
- * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project; and
- * "Connect your AI".
+ * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project;
+ * "Connect your AI", and the steps from there to an exported video (#740).
  */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
@@ -37,13 +40,29 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     return window.frameshell.project.onVideosOffered(take);
   }, []);
 
+  // File > New Project from Video… / New Video from an Idea… (#740): start that way at once, once.
+  useEffect(() => {
+    const take = () =>
+      void window.frameshell.project.takeStart().then((start) => {
+        if (start === "video") void chooseVideosRef.current();
+        else if (start === "idea") {
+          setPlan(null);
+          setIdea(true);
+          setNotProject(null);
+          setError(null);
+        }
+      });
+    take();
+    return window.frameshell.project.onStartOffered(take);
+  }, []);
+
   const run = async (action: () => Promise<OpenOutcome>) => {
     setBusy(true);
     setError(null);
     try {
       const outcome = await action();
       if (outcome.status === "not-a-project") setNotProject(outcome.dir);
-      else if (outcome.status === "error") setError(outcome.message);
+      else if (outcome.status === "error") setError(systemErrorText(outcome.message) ?? outcome.message);
       else setNotProject(null);
       onOutcome(outcome);
     } finally {
@@ -70,25 +89,29 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   );
   const dragging = useFileDrop(useCallback((paths: string[]) => void dropped(paths), [dropped]));
 
+  const chooseVideosRef = useRef(async () => {});
   const chooseVideos = async () => {
     setError(null);
     try {
       const chosen = await window.frameshell.project.chooseVideos();
-      if (chosen) {
-        setPlan(chosen);
+      if (chosen?.plan) {
+        setPlan(chosen.plan);
         setNotProject(null);
       }
+      if (chosen && chosen.refused.length > 0) setError(t.welcome.notVideo(chosen.refused.map(fileName).join(", ")));
     } catch (failure) {
       setError((failure as Error).message);
     }
   };
+
+  chooseVideosRef.current = chooseVideos;
 
   return (
     <main className={`welcome drag${dragging ? " is-dropping" : ""}`}>
       <div className="welcome-card no-drag">
         <FrameMark />
         <h1>Frameshell</h1>
-        <p className="welcome-lede">{t.welcome.lede}</p>
+        {!idea && <p className="welcome-lede">{t.welcome.lede}</p>}
         {dragging && <p className="welcome-drop">{t.welcome.dropHere}</p>}
 
         {plan ? (
@@ -105,6 +128,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
         ) : idea ? (
           <NewFromIdea
             busy={busy}
+            error={error}
             onError={setError}
             onCancel={() => {
               setIdea(false);
@@ -142,7 +166,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
             </button>
           </div>
         )}
-        {error && (
+        {error && !idea && (
           <p className="welcome-error" role="alert">
             {error}
           </p>
@@ -155,6 +179,17 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
               <p>{t.agents.connect.welcome.body}</p>
             </div>
             <ConnectAiButton className="button primary" />
+          </section>
+        )}
+
+        {!plan && !idea && (
+          <section className="welcome-path" aria-label={t.welcome.path.title} data-testid="welcome-path">
+            <h2>{t.welcome.path.title}</h2>
+            <ol>
+              {t.welcome.path.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
           </section>
         )}
 
@@ -212,6 +247,18 @@ function NewFromVideo({
   const [mode, setMode] = useState<"copy" | "link">("copy");
   const [transcribe, setTranscribe] = useState(true);
   const [orientation, setOrientation] = useState<AudioOrientation>("landscape");
+  // What "Transcribe" still downloads on this machine (#742): null while unknown, so the hint stays general.
+  const [download, setDownload] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    window.frameshell.project
+      .transcriptionDownload()
+      .then((bytes) => live && setDownload(bytes))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
   // Replans only for the latest edit: a slow answer for an older name must not overwrite a newer one.
   const latest = useRef(0);
 
@@ -269,6 +316,30 @@ function NewFromVideo({
       </div>
 
       {plan.imageOnly && !plan.existing && <p className="welcome-hint">{t.welcome.imageHint}</p>}
+      {plan.imageOnly && !plan.existing && plan.files.length > 1 && (
+        // The order the layers stack in, bottom first: the first one also sets the picture's size (#751).
+        <ol className="welcome-order" aria-label={t.welcome.layerOrder}>
+          {plan.files.map((file, index) => (
+            <li key={file}>
+              <span className="welcome-order-name">{fileName(file)}</span>
+              {index === 0 && <small className="welcome-order-note">{t.welcome.bottomLayer}</small>}
+              <button type="button" className="link" disabled={busy || index === 0} aria-label={t.welcome.layerDown(fileName(file))} onClick={() => onPlan({ ...plan, files: swapped(plan.files, index, index - 1) })}>
+                {t.welcome.down}
+              </button>
+              <button
+                type="button"
+                className="link"
+                disabled={busy || index === plan.files.length - 1}
+                aria-label={t.welcome.layerUp(fileName(file))}
+                onClick={() => onPlan({ ...plan, files: swapped(plan.files, index, index + 1) })}
+              >
+                {t.welcome.up}
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!plan.imageOnly && !plan.existing && plan.files.some(isImagePath) && <p className="welcome-hint">{t.welcome.mixedHint}</p>}
 
       {plan.audioOnly && !plan.existing && (
         <fieldset className="welcome-mode">
@@ -307,7 +378,13 @@ function NewFromVideo({
           <input type="checkbox" checked={transcribe} onChange={(event) => setTranscribe(event.target.checked)} />
           <span>
             {t.welcome.transcribe}
-            <small>{t.welcome.transcribeHint}</small>
+            <small>
+              {download === null
+                ? t.welcome.transcribeHint
+                : download > 0
+                  ? t.welcome.transcribeDownload(downloadSize(download))
+                  : t.welcome.transcribeReady}
+            </small>
           </span>
         </label>
       )}
@@ -322,6 +399,13 @@ function NewFromVideo({
       </div>
     </form>
   );
+}
+
+/** `files` with the entries at `a` and `b` swapped. */
+function swapped(files: readonly string[], a: number, b: number): string[] {
+  const next = [...files];
+  [next[a], next[b]] = [next[b]!, next[a]!];
+  return next;
 }
 
 function fileName(path: string): string {

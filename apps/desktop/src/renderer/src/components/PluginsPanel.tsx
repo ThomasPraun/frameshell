@@ -1,9 +1,16 @@
 import { officialPlugin } from "@frameshell/protocol/official-plugins";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MachineDownloads, PluginsView } from "../../../shared/api.js";
+import type { MachineDownloads, OpenAiKeyState, PluginsView } from "../../../shared/api.js";
 import { downloadSize, sizeText } from "../../../shared/sizes.js";
 import { t } from "../i18n.js";
-import { type DownloadRow, type PluginRow, downloadRows, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
+import { type DownloadRow, type PluginRow, downloadRows, downloadUse, errorParts, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
+import { useIdea } from "../idea.js";
+
+/** What a video made from an idea needs first: a generator of motion clips (#752). */
+const IDEA_PLUGINS = ["@frameshell/hyperframes"];
+
+/** Where people get an OpenAI API key. */
+const OPENAI_KEYS_URL = "https://platform.openai.com/api-keys";
 
 /** Notice line above the sections: what the last action did or why it failed. */
 type Notice = { text: string; error: boolean };
@@ -24,10 +31,13 @@ export function PluginsPanel() {
   /** Key of the action running (`install:<name>`, `remove:<name>`, `trust`, `download:<name>`); one at a time. */
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [key, setKey] = useState<OpenAiKeyState | null>(null);
 
   const readPlugins = useCallback(async () => {
     try {
-      setView(await window.frameshell.plugins.read());
+      const [read, keyState] = await Promise.all([window.frameshell.plugins.read(), window.frameshell.plugins.keyState()]);
+      setView(read);
+      setKey(keyState);
       setReadError(null);
     } catch (error) {
       setReadError((error as Error).message);
@@ -93,6 +103,29 @@ export function PluginsPanel() {
       },
       t.plugins.trust.failed,
     );
+  /** Resolves true when the key was saved, so the field can forget what was typed. */
+  const saveKey = async (value: string) => {
+    let saved = false;
+    await act(
+      "key",
+      async () => {
+        await window.frameshell.plugins.saveKey(value);
+        saved = true;
+        return t.plugins.key.saved;
+      },
+      t.plugins.key.saveFailed,
+    );
+    return saved;
+  };
+  const removeKey = () =>
+    act(
+      "key",
+      async () => {
+        await window.frameshell.plugins.removeKey();
+        return t.plugins.key.removed;
+      },
+      t.plugins.key.removeFailed,
+    );
   const removeDownload = (row: DownloadRow) =>
     act(
       `download:${row.name}`,
@@ -104,7 +137,8 @@ export function PluginsPanel() {
     );
 
   const prompt = view ? trustPrompt(view.catalog.trust) : null;
-  const rows = view ? pluginRows(view.catalog) : [];
+  const idea = useIdea();
+  const rows = view ? pluginRows(view.catalog, idea ? IDEA_PLUGINS : []) : [];
   const others = view ? otherPlugins(view) : [];
   const downloads = machine ? downloadRows(machine, view?.catalog ?? null) : null;
   const installOpen = view !== null && (view.catalog.trust === "not-required" || view.catalog.trust === "trusted");
@@ -141,7 +175,16 @@ export function PluginsPanel() {
         {readError && <p className="plugins-error">{t.plugins.cannotRead(readError)}</p>}
         <ul className="plugins-list">
           {rows.map((row) => (
-            <PluginItem key={row.name} row={row} busy={busy} onInstall={() => void install(row)} onRemove={() => void remove(row)} />
+            <PluginItem
+              key={row.name}
+              row={row}
+              busy={busy}
+              keyState={key}
+              onInstall={() => void install(row)}
+              onRemove={() => void remove(row)}
+              onSaveKey={saveKey}
+              onRemoveKey={() => void removeKey()}
+            />
           ))}
         </ul>
         {others.length > 0 && (
@@ -153,9 +196,9 @@ export function PluginsPanel() {
                 <li key={plugin.name} className="plugin" data-testid="plugin" data-name={plugin.name} data-state={plugin.status}>
                   <div className="plugin-head">
                     <span className="plugin-title">{plugin.name}</span>
-                    <span className={`plugin-state is-${plugin.status}`}>{stateText(plugin.status)}</span>
+                    <span className={`plugin-state is-${plugin.status}`}>{plugin.status === "untrusted" ? t.plugins.state.declared : stateText(plugin.status)}</span>
                   </div>
-                  {plugin.error && <p className="plugins-error">{plugin.error}</p>}
+                  {plugin.error && <PluginError text={plugin.error} />}
                   <div className="plugins-actions">
                     <button className="button" disabled={busy !== null} onClick={() => void remove(plugin)}>
                       {busy === `remove:${plugin.name}` ? t.plugins.removing : t.plugins.remove}
@@ -181,7 +224,10 @@ export function PluginsPanel() {
           {downloads?.rows.map((row) => (
             <li key={row.name} className="download" data-testid="download" data-name={row.name} data-on-disk={row.onDisk}>
               <span className="download-name">
-                {row.name} <span className="plugins-meta">{row.kind === "model" ? t.plugins.downloads.model : t.plugins.downloads.program}</span>
+                <span className="download-title">{row.name}</span>
+                <span className="plugins-meta" data-testid="download-use">
+                  {usedFor(row)}
+                </span>
               </span>
               <span className="download-size">
                 {row.onDisk ? sizeText(row.bytes ?? 0) : row.bytes ? t.plugins.downloads.notYetSized(downloadSize(row.bytes)) : t.plugins.downloads.notYet}
@@ -199,7 +245,18 @@ export function PluginsPanel() {
   );
 }
 
-function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: string | null; onInstall: () => void; onRemove: () => void }) {
+interface PluginItemProps {
+  row: PluginRow;
+  busy: string | null;
+  /** Where the OpenAI key comes from; null until read. */
+  keyState: OpenAiKeyState | null;
+  onInstall: () => void;
+  onRemove: () => void;
+  onSaveKey: (value: string) => Promise<boolean>;
+  onRemoveKey: () => void;
+}
+
+function PluginItem({ row, busy, keyState, onInstall, onRemove, onSaveKey, onRemoveKey }: PluginItemProps) {
   return (
     <li className="plugin" data-testid="plugin" data-name={row.name} data-state={row.state}>
       <div className="plugin-head">
@@ -210,10 +267,20 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
         </span>
       </div>
       <p className="plugin-purpose">{t.plugins.about[row.name]?.purpose ?? row.name}</p>
-      <p className={`plugins-meta${row.need.met === false ? " is-unmet" : ""}`}>{needText(row)}</p>
+      <p className={`plugins-meta${row.need.met === false ? " is-unmet" : ""}`} data-testid="plugin-need">
+        {needText(row, keyState)}
+      </p>
+      {row.need.kind === "openai-key" && keyState && (
+        <OpenAiKeyField state={keyState} met={row.need.met === true} busy={busy} onSave={onSaveKey} onRemove={onRemoveKey} />
+      )}
       <p className="plugins-meta">{row.cost === "free" ? t.plugins.free : row.cost === "cloud-audio" ? t.plugins.paidAudio : t.plugins.paidText}</p>
       <p className="plugins-meta">{downloadText(row)}</p>
-      {row.error && <p className="plugins-error">{row.error}</p>}
+      {row.error && <PluginError text={row.error} />}
+      {busy === `install:${row.name}` && (
+        <p className="plugins-meta" role="status" data-testid="plugin-installing">
+          {t.plugins.installingNote}
+        </p>
+      )}
       <div className="plugins-actions">
         {row.install && (
           <button
@@ -222,7 +289,7 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
             data-tip={row.installBlocked ? t.plugins.installNeedsTrust : undefined}
             onClick={onInstall}
           >
-            {busy === `install:${row.name}` ? t.plugins.installing : t.plugins.install}
+            {busy === `install:${row.name}` ? <Elapsed /> : t.plugins.install}
           </button>
         )}
         {row.remove && (
@@ -232,6 +299,107 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
         )}
       </div>
     </li>
+  );
+}
+
+/**
+ * The OpenAI key field (ADR 0050): a password input with Save while no key is set and this computer can encrypt one,
+ * Remove once one is saved here, nothing when the key comes from the environment. What was typed is dropped after a
+ * save; the saved key never comes back to this view.
+ */
+function OpenAiKeyField({
+  state,
+  met,
+  busy,
+  onSave,
+  onRemove,
+}: {
+  state: OpenAiKeyState;
+  met: boolean;
+  busy: string | null;
+  onSave: (value: string) => Promise<boolean>;
+  onRemove: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const said = t.plugins.key;
+  if (state.source === "environment") return null;
+  if (state.source === "app") {
+    return (
+      <div className="plugins-actions">
+        <button className="button" disabled={busy !== null} onClick={onRemove} data-testid="openai-key-remove">
+          {busy === "key" ? t.plugins.removing : said.remove}
+        </button>
+      </div>
+    );
+  }
+  // Set in the engine's own environment (started from a terminal), or nowhere to keep one: nothing to type here.
+  if (met || !state.storable) return null;
+  const save = async () => {
+    if (await onSave(draft)) setDraft("");
+  };
+  return (
+    <form
+      className="plugin-key"
+      data-testid="openai-key-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <label className="plugin-key-label">
+        <span>{said.label}</span>
+        <input
+          type="password"
+          className="plugin-key-input"
+          value={draft}
+          placeholder={said.placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          data-testid="openai-key-input"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <div className="plugins-actions">
+        <button type="submit" className="button primary" disabled={busy !== null || draft.trim() === ""} data-testid="openai-key-save">
+          {busy === "key" ? said.saving : said.save}
+        </button>
+        <a className="link" href={OPENAI_KEYS_URL} target="_blank" rel="noreferrer">
+          {said.getOne}
+        </a>
+      </div>
+    </form>
+  );
+}
+
+/** "Installing… 12 s": the seconds of an install so far, so a long npm run shows it is still going (#740). */
+function Elapsed() {
+  const [seconds, setSeconds] = useState(0);
+  const own = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const view = own.current?.ownerDocument.defaultView ?? window;
+    const started = Date.now();
+    const timer = view.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => view.clearInterval(timer);
+  }, []);
+  return <span ref={own}>{seconds === 0 ? t.plugins.installing : t.plugins.installingFor(seconds)}</span>;
+}
+
+/**
+ * A plugin's load error, short: its first line (first sentence of a long one) shows, the rest folds under
+ * Details, so a missing key does not fill the card with red lines (#753).
+ */
+function PluginError({ text }: { text: string }) {
+  const { head, rest } = errorParts(text);
+  return (
+    <div className="plugins-error" data-testid="plugin-error">
+      <p>{head}</p>
+      {rest && (
+        <details className="plugin-error-details">
+          <summary>{t.plugins.errorDetails}</summary>
+          <pre>{rest}</pre>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -245,8 +413,11 @@ function stateText(state: PluginRow["state"]): string {
   return state === "loaded" ? said.loaded : state === "error" ? said.error : state === "untrusted" ? said.untrusted : said.notInstalled;
 }
 
-/** What the plugin needs, and whether this machine has it. The key's value is never read here: only set or not. */
-function needText(row: PluginRow): string {
+/**
+ * What the plugin needs, and whether this machine has it. The key's value is never read here: only where it comes
+ * from (`key`, ADR 0050) and whether the engine has one (`need.met`).
+ */
+function needText(row: PluginRow, key: OpenAiKeyState | null): string {
   const said = t.plugins.need;
   switch (row.need.kind) {
     case "none":
@@ -255,11 +426,29 @@ function needText(row: PluginRow): string {
       return `${said.blender} ${row.need.met ? said.blenderFound : said.blenderMissing}`;
     case "openai-key": {
       const variable = officialPlugin(row.name)?.need.variable ?? "";
-      return `${said.openaiKey(variable)} ${row.need.met ? said.keySet : said.keyMissing(variable)}`;
+      const where =
+        key?.source === "environment"
+          ? said.keyFromEnvironment(variable)
+          : key?.source === "app"
+            ? said.keySaved
+            : row.need.met
+              ? said.keySet
+              : key && !key.storable
+                ? said.keyNotStorable(variable)
+                : said.keyMissing;
+      return `${said.openaiKey} ${where}`;
     }
     case "remotion-project":
       return said.remotion;
   }
+}
+
+/** A download's kind, and what it is for when this app knows. */
+function usedFor(row: DownloadRow): string {
+  const said = t.plugins.downloads;
+  const kind = row.kind === "model" ? said.model : said.program;
+  const use = downloadUse(row.name);
+  return use ? said.usedFor(kind, said.use[use]) : kind;
 }
 
 function downloadText(row: PluginRow): string {

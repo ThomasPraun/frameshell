@@ -1,10 +1,10 @@
 # Releasing Frameshell
 
-The desktop app ships as a macOS DMG (arm64 and x64), a Linux AppImage and `.deb` (x64), and an unsigned Windows beta installer (NSIS, x64) (SPEC §4, decision 16). `.github/workflows/release.yml` builds them with electron-builder (`apps/desktop/electron-builder.yml`) through `apps/desktop/scripts/release/package.mjs`.
+The desktop app ships as a macOS DMG (arm64 and x64), a Linux AppImage and `.deb` (x64), and a Windows beta installer (NSIS, x64), signed through SignPath Foundation once it is set up (SPEC §4, decision 16, ADR 0051). `.github/workflows/release.yml` builds them with electron-builder (`apps/desktop/electron-builder.yml`) through `apps/desktop/scripts/release/package.mjs`.
 
 ## What the pipeline does
 
-| Trigger | Builds and smoke-tests | Signs macOS | Publishes |
+| Trigger | Builds and smoke-tests | Signs macOS and Windows | Publishes |
 |---|---|---|---|
 | Push of a tag `v<major>.<minor>.<patch>[-pre]` | yes | if the secrets exist | a **draft** GitHub release with the installers, the update files (see [Updates](#updates)) and `SHA256SUMS.txt` |
 | Actions → Release → Run workflow (`workflow_dispatch`) | yes | if the secrets exist | nothing: installers are workflow artifacts (14 days) |
@@ -16,8 +16,9 @@ Each OS job:
 1. `pnpm build`, then `package.mjs`. It stamps the version from the tag into the app (`0.0.0-ci.<run>` for untagged runs), picks the signing mode, writes a line about it to the job summary, and calls electron-builder with `--publish never`. electron-builder never publishes on its own.
 2. Runs the Playwright smoke suite (`apps/desktop/e2e`) against the **packaged** app (`FRAMESHELL_E2E_APP`). The suite runs `frameshell status` in the integrated terminal, so it fails if the bundled CLI or daemon is broken.
 3. On macOS, when notarized: `stapler validate` and `spctl --assess` on each app.
+4. On Windows, when SignPath is set up, between packaging and the smoke test: sign the app, build the installer from it, sign the installer, and check both signatures (see [Windows signing](#windows-signing-signpath)).
 
-The draft release is published by hand after review. A tag with a `-` (for example `v0.1.0-beta.1`) is marked as a prerelease.
+The draft release's notes start with one installer per OS (`apps/desktop/scripts/release/downloads.mjs`), then the generated list of changes. The draft release is published by hand after review. A tag with a `-` (for example `v0.1.0-beta.1`) is marked as a prerelease.
 
 Before drafting, the publish job checks the ffmpeg mirror: the GitHub release named in the manifest must exist, and its `SHA256SUMS.txt` must match every pinned archive and source. The app release itself attaches no ffmpeg binary. The mirror is its own release, published by `.github/workflows/binaries-mirror.yml` together with the corresponding source, a written offer and the licence (see `docs/binaries.md`, "Mirror and licence obligations"). If the check fails, run **Actions → Binary mirror → Run workflow** on `main`, then re-run the release.
 
@@ -35,7 +36,7 @@ The app checks GitHub Releases for a newer version 10 s after start and then dai
 |---|---|
 | macOS (notarized) | electron-updater downloads the zip in the background, then a banner "Restart to Update". The update is also installed on the next quit. |
 | Linux AppImage | Same as macOS, installed only through "Restart to Update". |
-| Windows (unsigned), Linux `.deb` | A banner "Frameshell X is available." with a link to the release page. Installing is by hand. |
+| Windows, Linux `.deb` | A banner "Frameshell X is available." with a link to the release page. Installing is by hand. |
 | Dev, e2e, CI and local packages (`0.0.0-*`) | No check. `FRAMESHELL_UPDATE_CHECK=1` forces one (an unpackaged build only shows the banner), `=0` turns it off. |
 
 When downloading or installing fails (an unsigned macOS build, the app run from the DMG or another read-only volume), the app shows the download banner instead. The menu (macOS: app menu; Windows and Linux: Help) has **Check for Updates…** and the checkbox **Check for Updates Automatically**, stored in `configDir/updates.json`.
@@ -167,7 +168,49 @@ Only the Account Holder of the Apple Developer team can create a Developer ID ce
 
 After the workflow is on `main`, run **Actions → Release → Run workflow**. The macOS job summary should say "Signed with the Developer ID certificate and notarized", and the "Check notarization" step should pass. Nothing is published.
 
-Linux and Windows need no secrets. Windows builds stay unsigned at v0.1: SmartScreen warns on first run.
+Linux needs no secrets. Windows signs through SignPath: see the next section.
+
+## Windows signing (SignPath)
+
+The Windows app and installer are signed by [SignPath.io](https://about.signpath.io) with a certificate of [SignPath Foundation](https://signpath.org), free for open source projects (ADR 0051). The publisher shown by Windows is "SignPath Foundation". The project's side of the Foundation's conditions is [CODE_SIGNING_POLICY.md](../CODE_SIGNING_POLICY.md) and [PRIVACY.md](../PRIVACY.md); keep both true.
+
+Until the secret and the three variables below exist, the Windows job builds **unsigned**, as before, and the job summary warns about SmartScreen. If only some exist, the job **fails** and names what is missing. Pull requests never sign.
+
+| Name | Kind | Value |
+|---|---|---|
+| `SIGNPATH_API_TOKEN` | repository **secret** | API token of a SignPath user with the *submitter* role on the project (a CI user, not your own login) |
+| `SIGNPATH_ORGANIZATION_ID` | repository **variable** | Organization ID (UUID), from SignPath → Settings |
+| `SIGNPATH_PROJECT_SLUG` | repository **variable** | The project's slug, for example `frameshell` |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | repository **variable** | The release signing policy's slug, for example `release-signing` |
+
+```sh
+gh secret set SIGNPATH_API_TOKEN -R ThomasPraun/frameshell        # paste the token
+gh variable set SIGNPATH_ORGANIZATION_ID -R ThomasPraun/frameshell --body <uuid>
+gh variable set SIGNPATH_PROJECT_SLUG -R ThomasPraun/frameshell --body frameshell
+gh variable set SIGNPATH_SIGNING_POLICY_SLUG -R ThomasPraun/frameshell --body release-signing
+```
+
+### What the Windows job does
+
+1. `package.mjs` stops at `release/win-unpacked` (electron-builder `--dir`).
+2. It reads `ProductVersion` from `Frameshell.exe`, uploads `win-unpacked` as a workflow artifact and sends it to SignPath with the artifact configuration `app` ([`.signpath/artifact-configurations/app.xml`](../.signpath/artifact-configurations/app.xml)). The action waits up to an hour for your approval, then replaces `win-unpacked` with the signed copy.
+3. `package.mjs --installer` builds the NSIS installer from the signed app (`--prepackaged`), so the installed app is signed too.
+4. The installer goes to SignPath with the artifact configuration `installer` ([`installer.xml`](../.signpath/artifact-configurations/installer.xml)): a second approval.
+5. `Get-AuthenticodeSignature` must say `Valid` for both files, then the smoke test runs on the signed app.
+
+Both configurations restrict the product name to `Frameshell` and the product version to the value from step 2, as the Foundation requires. The NSIS uninstaller and Electron's DLLs stay unsigned.
+
+### Set up SignPath (once, by the maintainer)
+
+1. Apply at [signpath.org/apply](https://signpath.org/apply). SignPath Foundation reviews the project and sets up the organization and the project for you.
+2. Turn on multi-factor authentication on GitHub and on SignPath (a Foundation condition for every team member).
+3. Install the SignPath GitHub App on `ThomasPraun/frameshell` (linked from [SignPath's GitHub guide](https://docs.signpath.io/trusted-build-systems/github)), and in SignPath add the predefined trusted build system **GitHub.com** to the organization and link it to the project.
+4. In the project, create two artifact configurations with the slugs `app` and `installer`, pasting the XML from `.signpath/artifact-configurations/`. After a change to those files, paste them again.
+5. In the release signing policy: turn on **Verify origin**, set the allowed branches to `main` and the release tags `v*` (check in the policy editor how SignPath names a tag ref), require approval by you, and add the pipeline policy that requires GitHub-hosted runners.
+6. Create a CI user with the *submitter* role, generate its API token, and set the secret and variables above.
+7. Run **Actions → Release → Run workflow** on `main`. Approve the two requests on signpath.io. The Windows job summary must say "signed through SignPath", and the "check both signatures" step must print `Valid` with `CN=SignPath Foundation`. Nothing is published.
+
+SmartScreen can still warn on the first downloads of a newly signed release until the certificate has reputation; it no longer shows "Unknown publisher".
 
 ## Cut a release
 
@@ -180,7 +223,7 @@ Linux and Windows need no secrets. Windows builds stay unsigned at v0.1: SmartSc
    git push origin v0.1.0
    ```
 
-3. Wait for the **Release** workflow. Read each job summary: the macOS job must say *notarized*. If it says *unsigned*, the secrets are missing. Delete the draft and the tag, add the secrets, and tag again.
+3. Wait for the **Release** workflow and approve the two Windows signing requests on signpath.io (when SignPath is set up). Read each job summary: the macOS job must say *notarized*, the Windows job *signed through SignPath*. If it says *unsigned*, the secrets are missing. Delete the draft and the tag, add the secrets, and tag again.
 4. Open the draft release. Download the DMG on a Mac that has never run Frameshell and open it: the app must start with no Gatekeeper warning. `spctl --assess --type execute -vv /Applications/Frameshell.app` must print `source=Notarized Developer ID`.
 5. Edit the notes if needed, then **Publish release**. This stages the official plugins whose version is new to npm: check the `npm plugins` job, approve each staged version (`npm stage approve`, see [npm plugins](#npm-plugins)), then `npm view @frameshell/hyperframes version`.
 
@@ -201,4 +244,4 @@ Local builds are unsigned unless you export the signing variables above. Output 
 ## Not done yet
 
 - **Linux arm64 and Windows arm64** are not built.
-- **Windows auto-update**: Windows stays unsigned, so it only shows the banner (see [Updates](#updates)).
+- **Windows auto-update**: Windows only shows the banner (see [Updates](#updates)). Signing (ADR 0051) unblocks electron-updater installs on Windows; not done yet.

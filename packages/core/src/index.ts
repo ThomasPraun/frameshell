@@ -52,7 +52,7 @@ export {
   peopleScanWorker,
   scanFrameSize,
   scanPeopleFaces,
-  shrinkFrame,
+  resizeFrame,
   similarityTransform,
 } from "./people/scan.js";
 export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";
@@ -394,6 +394,7 @@ export {
   type RenderedClip,
 } from "./clips/renderer.js";
 export { ClipVerifier, type ClipVerifyOptions } from "./clips/verify.js";
+export { type MeasuredText, TEXT_FIT_SCRIPT, TextFitChecker, type TextFitOptions, textFitProblems, textFitTimes } from "./clips/text-fit.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type SpeakerSource, type TurnsSource, type TurnsTranscript, groupTurns } from "./multicam/group-turns.js";
 export {
@@ -471,6 +472,18 @@ export {
   reframePlacement,
   reframeTarget,
 } from "./reframe.js";
+export {
+  type PointerRest,
+  ZOOM,
+  type ZoomGeometry,
+  type ZoomKey,
+  type ZoomPlacement,
+  type ZoomPlan,
+  type ZoomSpan,
+  planZoom,
+  pointerRests,
+  zoomPlacement,
+} from "./zoom.js";
 export {
   type DecoderOutput,
   type PhotoInput,

@@ -80,7 +80,8 @@ describe("format changes in review mode", () => {
       timelines: [],
       config: [{ doc: "project", key: "format:9x16", before: null, after: NINE_SIXTEEN }],
     });
-    expect(events.at(-1)).toMatchObject({ state: "ready", config: [{ key: "format:9x16" }] });
+    // The event reaches the subscriber on its own socket write, which can land after the status reply.
+    await expect.poll(() => events.at(-1)).toMatchObject({ state: "ready", config: [{ key: "format:9x16" }] });
     await expect(agent.request("proposal.accept", { cwd: dir, tx: begun.tx })).rejects.toMatchObject({ data: { reason: "forbidden" } });
 
     const accepted = await ui().request("proposal.accept", { cwd: dir, tx: begun.tx });

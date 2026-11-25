@@ -1,0 +1,5 @@
+{
+  "name": "frameshell",
+  "owner": { "name": "Frameshell" },
+  "plugins": [{ "name": "frameshell", "source": "./mods/frameshell" }]
+}

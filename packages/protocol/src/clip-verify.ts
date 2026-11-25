@@ -49,3 +49,40 @@ export const ClipVerifyResultSchema = z.object({
     .describe("The frame and element that differ most; null when every probe was identical."),
   warnings: z.array(z.string()),
 });
+
+// `clip.textFit` (#803): does every line of text of a generated clip stay inside its box and the frame, with its
+// props as they are or with others (another language) tried for the check only.
+
+/** Settled points of the clip's played part a text fit checks when no `at` is given, as fractions of its length. */
+export const TEXT_FIT_DEFAULT_FRACTIONS = [0.5, 0.7, 0.9] as const;
+/** Most times one text fit may check; each is a seek of one page. */
+export const TEXT_FIT_MAX_TIMES = 12;
+/** Page pixels text may pass its box or the frame by before it counts (anti-aliasing, sub-pixel layout). */
+export const TEXT_FIT_SLACK_PX = 1;
+
+/** One line of text that does not fit. */
+export const TextFitProblemSchema = z.object({
+  kind: z
+    .enum(["outside", "overflows"])
+    .describe("`outside`: the text passes the edge of the frame. `overflows`: it passes the box of its own element (a button, a card, a fixed-width line)."),
+  at: z.number().describe("Composition seconds where it was worst, 3 decimals."),
+  by: z.number().describe("Page pixels it passes the edge by, the most over the times checked, 1 decimal."),
+  side: z.enum(["left", "right", "top", "bottom"]).describe("The edge it passes most."),
+  selector: z.string().describe("CSS selector of the element, as `inspect.point` reports elements."),
+  text: z.string().describe("Its text, cut at 80 characters."),
+  box: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).describe("The text's own box at `at`, page pixels."),
+});
+
+/** Result of `clip.textFit`. */
+export const ClipTextFitResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  clip: z.string().describe("The checked clip, as asked."),
+  type: z.string().describe("Its adapter type, e.g. `hyperframes`."),
+  ok: z.boolean().describe("True when every line of text fits at every time checked."),
+  size: z.object({ width: z.int(), height: z.int() }).describe("Frame size checked: the page at the project resolution."),
+  tried: z.array(z.string()).describe("Props given in `props` for this check (nothing written); empty when the clip's own were used."),
+  at: z.array(z.number()).describe("Composition seconds checked, in order."),
+  lines: z.int().min(0).describe("Elements with text of their own seen at the times checked."),
+  problems: z.array(TextFitProblemSchema).describe("One per element and kind, worst first."),
+  warnings: z.array(z.string()),
+});

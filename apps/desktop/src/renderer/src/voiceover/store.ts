@@ -1,7 +1,7 @@
 // The one voiceover dialog's state (ADR 0034 decision 22): generate with progress and Cancel, the misread report, and
 // placing the takes. One store outside the view, like the context menu, so a run goes on whatever the Explorer does.
 import type { VoiceoverGenerateResult, VoiceoverPlaceResult } from "@frameshell/protocol";
-import type { VoiceoverProgress } from "../../../shared/api.js";
+import type { VoiceChoice, VoiceoverPlaceRun, VoiceoverProgress } from "../../../shared/api.js";
 import type { CheckAsked } from "./model.js";
 
 /** Where the person is in a generation. `none`: the dialog was opened only to place. */
@@ -12,7 +12,9 @@ export type Run =
   | { kind: "running"; progress: VoiceoverProgress | null; stopping: boolean; /** Stop found nothing of this app to stop (the daemon had no call of ours yet). */ nothingStopped: boolean }
   | { kind: "report"; result: VoiceoverGenerateResult; asked: CheckAsked }
   | { kind: "stopped"; kept: number }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; message: string }
+  /** No voice to say the lines (#756): pick one of `available`, or add one in Plugins. `missing`: the voice the script names. */
+  | { kind: "voice"; missing: string | null; available: VoiceChoice[]; chosen: string };
 
 /** The "Place on the timeline" form. */
 export interface PlaceForm {
@@ -22,6 +24,8 @@ export interface PlaceForm {
   busy: boolean;
   result: VoiceoverPlaceResult | null;
   error: string | null;
+  /** Why the last Place was refused, when the person can act on it (`replace`: tick Replace); null otherwise. */
+  refusal: Extract<VoiceoverPlaceRun, { status: "refused" }>["reason"] | null;
   /** Marker labels of the main timeline, offered as suggestions. */
   markers: string[];
 }
@@ -35,6 +39,8 @@ export interface DialogState {
   run: Run;
   /** The place form; null until a generation reported or place-only was asked. */
   place: PlaceForm | null;
+  /** The voice picked in the dialog for this script, sent as `provider`; null = the script's own. */
+  provider: string | null;
 }
 
 let current: DialogState | null = null;
@@ -64,7 +70,7 @@ function update(id: number, change: (state: DialogState) => DialogState): void {
   if (id === session && current) publish(change(current));
 }
 
-const emptyForm = (markers: string[] = []): PlaceForm => ({ start: "", replace: false, busy: false, result: null, error: null, markers });
+const emptyForm = (markers: string[] = []): PlaceForm => ({ start: "", replace: false, busy: false, result: null, error: null, refusal: null, markers });
 
 /** Marker labels for the place form; suggestions only, so failing to read them is not an error. */
 function loadMarkers(id: number): void {
@@ -75,14 +81,17 @@ function loadMarkers(id: number): void {
 }
 
 /** Run the generation. `asked` is whether the misread check was asked for. */
-async function generate(id: number, script: string, verify: boolean, asked: CheckAsked): Promise<void> {
+async function generate(id: number, script: string, verify: boolean, asked: CheckAsked, provider: string | null): Promise<void> {
   update(id, (state) => ({ ...state, run: { kind: "running", progress: null, stopping: false, nothingStopped: false } }));
   const off = api().onProgress((progress) => {
     update(id, (state) => (state.run.kind === "running" ? { ...state, run: { ...state.run, progress } } : state));
   });
   try {
-    const run = await api().generate(script, verify);
+    const run = await api().generate(script, verify, provider ?? undefined);
     if (run.status === "declined") return id === session ? publish(null) : undefined;
+    if (run.status === "no-voice") {
+      return update(id, (state) => ({ ...state, run: { kind: "voice", missing: run.missing, available: run.available, chosen: run.available[0]?.id ?? "" } }));
+    }
     if (run.status === "canceled") return update(id, (state) => ({ ...state, run: { kind: "stopped", kept: run.kept } }));
     update(id, (state) => ({ ...state, run: { kind: "report", result: run.result, asked }, place: emptyForm() }));
     loadMarkers(id);
@@ -99,17 +108,17 @@ export const voiceoverDialog = {
    * Generate the voiceover of `script` and show the report. When the misread check would first download transcription
    * tools the person is asked in the dialog; with no usable transcription it is left out and the report says so.
    */
-  async generate(script: string, view: Window = window): Promise<void> {
+  async generate(script: string, view: Window = window, provider: string | null = null): Promise<void> {
     if (current?.run.kind === "running") return;
     const id = ++session;
-    publish({ script, view, run: { kind: "getting" }, place: null });
+    publish({ script, view, run: { kind: "getting" }, place: null, provider });
     followWindow(id, view);
     try {
       const plan = await api().verifyPlan();
       // Closed while the plan was being read: nothing runs.
       if (id !== session) return;
       if (plan.kind === "download") return update(id, (state) => ({ ...state, run: { kind: "choose", bytes: plan.bytes } }));
-      await generate(id, script, plan.kind === "ready", plan.kind === "ready" ? "yes" : "unavailable");
+      await generate(id, script, plan.kind === "ready", plan.kind === "ready" ? "yes" : "unavailable", provider);
     } catch (error) {
       update(id, (state) => ({ ...state, run: { kind: "failed", message: messageOf(error) } }));
     }
@@ -118,14 +127,31 @@ export const voiceoverDialog = {
   /** Answer the question of the download: generate and check (the download is agreed), or generate without checking. */
   async choose(check: boolean): Promise<void> {
     if (!current || current.run.kind !== "choose") return;
-    await generate(session, current.script, check, check ? "yes" : "declined");
+    await generate(session, current.script, check, check ? "yes" : "declined", current.provider);
+  },
+
+  /** Pick the voice offered when the script names none (or one this project lacks). */
+  pickVoice(chosen: string): void {
+    if (current?.run.kind === "voice") publish({ ...current, run: { ...current.run, chosen } });
+  },
+
+  /** Generate with the picked voice, from the start (the misread check is planned again). */
+  async generateWithVoice(): Promise<void> {
+    if (current?.run.kind !== "voice" || !current.run.chosen) return;
+    await voiceoverDialog.generate(current.script, current.view, current.run.chosen);
+  },
+
+  /** After Stop: generate again with the same voice; the takes already made are reused, never paid for twice. */
+  async continueRun(): Promise<void> {
+    if (current?.run.kind !== "stopped") return;
+    await voiceoverDialog.generate(current.script, current.view, current.provider);
   },
 
   /** Open the dialog to place the takes `script` already has, without generating. */
   place(script: string, view: Window = window): void {
     if (current?.run.kind === "running") return;
     const id = ++session;
-    publish({ script, view, run: { kind: "none" }, place: emptyForm() });
+    publish({ script, view, run: { kind: "none" }, place: emptyForm(), provider: null });
     followWindow(id, view);
     loadMarkers(id);
   },
@@ -150,10 +176,14 @@ export const voiceoverDialog = {
     if (!current?.place || current.place.busy) return;
     const id = session;
     const { script, place } = current;
-    update(id, (state) => (state.place ? { ...state, place: { ...state.place, busy: true, error: null, result: null } } : state));
+    update(id, (state) => (state.place ? { ...state, place: { ...state.place, busy: true, error: null, refusal: null, result: null } } : state));
     try {
-      const result = await api().place(script, place.start, place.replace);
-      update(id, (state) => (state.place ? { ...state, place: { ...state.place, busy: false, result } } : state));
+      const run = await api().place(script, place.start, place.replace);
+      update(id, (state) =>
+        state.place
+          ? { ...state, place: { ...state.place, busy: false, ...(run.status === "placed" ? { result: run.result } : { refusal: run.reason }) } }
+          : state,
+      );
     } catch (error) {
       update(id, (state) => (state.place ? { ...state, place: { ...state.place, busy: false, error: messageOf(error) } } : state));
     }

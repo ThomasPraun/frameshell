@@ -10,7 +10,7 @@ Judge the **export**, never the project files or your memory of the code. Render
 frameshell review --file exports/draft.mp4 --json
 ```
 
-It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files are never touched) and prints each sheet's path, size and tile times; open the PNGs with your image tool. Every tile is labelled with its time in the file:
+It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files are never touched). Without `--json` it prints the **card** (`card.md`, about 300 tokens): the `requirements.json` verdict, the craft warnings to fix first (failing ones on top), the key numbers each labelled MEASURED, ESTIMATED (sampled frames, a timeline's sound from clip envelopes) or DECISION (the requirements judged), then `review.json` and `metrics.json` with their size and the images. Read the card, then open only what you need; `--full` prints every sheet path, size and number, `--json` the whole result (`card` and `layers` included). Open the PNGs with your image tool. Every tile is labelled with its time in the file:
 
 - `contact*.png`: a frame every 0.5 s (`--every` changes it), 30 to a sheet, several sheets for a long film. Review the timeline itself (no `--file`) and the sheet also marks clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a keyed clip (`1.50 cut`), which the file cannot tell.
 - `phone*.png`: one frame per second at 360 px wide: how it reads on a phone.

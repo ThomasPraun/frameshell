@@ -60,7 +60,7 @@ jobs:
         id: package
         run: node apps/desktop/scripts/release/package.mjs
         env:
-          # Only macOS signs. Pull requests never see signing secrets: they always build unsigned.
+          # Pull requests never see signing secrets: they always build unsigned.
           MACOS_CERTIFICATE_P12_BASE64: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
           MACOS_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
           APPLE_API_KEY_P8_BASE64: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8_BASE64 || '' }}
@@ -69,6 +69,96 @@ jobs:
           APPLE_ID: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+          # Windows signs through SignPath (ADR 0051). Only whether the token exists reaches the build, never the token.
+          SIGNPATH_API_TOKEN_SET: ${{ runner.os == 'Windows' && github.event_name != 'pull_request' && secrets.SIGNPATH_API_TOKEN != '' }}
+          SIGNPATH_ORGANIZATION_ID: ${{ runner.os == 'Windows' && github.event_name != 'pull_request' && vars.SIGNPATH_ORGANIZATION_ID || '' }}
+          SIGNPATH_PROJECT_SLUG: ${{ runner.os == 'Windows' && github.event_name != 'pull_request' && vars.SIGNPATH_PROJECT_SLUG || '' }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ runner.os == 'Windows' && github.event_name != 'pull_request' && vars.SIGNPATH_SIGNING_POLICY_SLUG || '' }}
+      # Windows with SignPath (ADR 0051): Package stopped at release/win-unpacked. Sign the app, build the installer
+      # from it, sign the installer. Each signing request waits for a maintainer's approval on signpath.io.
+      # Artifact configurations: .signpath/artifact-configurations/.
+      - name: Read the app's product version
+        id: product
+        if: steps.package.outputs.signing == 'signpath'
+        shell: pwsh
+        # Both signing requests pin this value, so SignPath refuses files of another build.
+        run: |
+          $version = (Get-Item "${{ steps.package.outputs.executable }}").VersionInfo.ProductVersion
+          "version=$version" >> $env:GITHUB_OUTPUT
+          echo "ProductVersion: $version"
+      - name: Upload the app for signing
+        id: unsigned-app
+        if: steps.package.outputs.signing == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-app
+          path: apps/desktop/release/win-unpacked/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign the app (SignPath)
+        if: steps.package.outputs.signing == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          # Time for the maintainer to approve the request.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: apps/desktop/release/win-unpacked-signed
+          parameters: |
+            productVersion: ${{ toJSON(steps.product.outputs.version) }}
+      - name: Swap in the signed app
+        if: steps.package.outputs.signing == 'signpath'
+        shell: bash
+        working-directory: apps/desktop/release
+        run: rm -rf win-unpacked && mv win-unpacked-signed win-unpacked
+      - name: Build the installer from the signed app
+        id: installer
+        if: steps.package.outputs.signing == 'signpath'
+        run: node apps/desktop/scripts/release/package.mjs --installer
+      - name: Upload the installer for signing
+        id: unsigned-installer
+        if: steps.package.outputs.signing == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-installer
+          path: ${{ steps.installer.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign the installer (SignPath)
+        if: steps.package.outputs.signing == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: apps/desktop/release/signed-installer
+          parameters: |
+            productVersion: ${{ toJSON(steps.product.outputs.version) }}
+      - name: Swap in the signed installer and check both signatures
+        if: steps.package.outputs.signing == 'signpath'
+        shell: pwsh
+        env:
+          APP: ${{ steps.package.outputs.executable }}
+          INSTALLER: ${{ steps.installer.outputs.installer }}
+        run: |
+          $signed = Join-Path "apps/desktop/release/signed-installer" (Split-Path $env:INSTALLER -Leaf)
+          Move-Item -Force $signed $env:INSTALLER
+          Remove-Item -Recurse -Force apps/desktop/release/signed-installer
+          foreach ($file in @($env:APP, $env:INSTALLER)) {
+            $signature = Get-AuthenticodeSignature $file
+            echo "$file : $($signature.Status) $($signature.SignerCertificate.Subject)"
+            if ($signature.Status -ne 'Valid') { throw "$file is not validly signed: $($signature.StatusMessage)" }
+          }
       # The packaged app, not the dev build: bundled CLI and daemon, asar, native modules.
       - name: Smoke test packaged app (xvfb)
         if: runner.os == 'Linux'
@@ -162,11 +252,14 @@ jobs:
         run: |
           prerelease=""
           if [[ "$TAG" == *-* ]]; then prerelease="--prerelease"; fi
+          # One download per OS on top (#740); --generate-notes appends the changes after it.
+          node apps/desktop/scripts/release/downloads.mjs dist "$GITHUB_REPOSITORY" "$TAG" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --draft $prerelease \
             --verify-tag \
             --title "Frameshell ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes
 
   # Official plugins on npm (SPEC §8.3). Every run packs them and runs `npm publish --dry-run`; only a

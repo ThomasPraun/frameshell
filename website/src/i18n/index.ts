@@ -11,12 +11,16 @@ export function strings(locale: string | undefined): Dict {
 }
 
 /** Pages of the site, each in every language. */
-export type Page = "home" | "agents";
+export type Page = "home" | "agents" | "docs";
 
-/** Path of `page` in `lang`: English at the root, Spanish under /es/. */
-export function pathFor(lang: Lang, page: Page = "home"): string {
+/**
+ * Path of `page` in `lang`: English at the root, Spanish under /es/. `slug` names one docs page
+ * (`docs/<slug>/`); without it, `docs` is the docs index.
+ */
+export function pathFor(lang: Lang, page: Page = "home", slug?: string): string {
   const root = lang === "en" ? "/" : `/${lang}/`;
-  return page === "home" ? root : `${root}${page}/`;
+  if (page === "home") return root;
+  return slug ? `${root}${page}/${slug}/` : `${root}${page}/`;
 }
 
 // The markup indexes lists by position (tabs, replies, layer colours), so a translation with a
