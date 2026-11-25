@@ -773,6 +773,15 @@ export interface FrameshellApi {
      * daemon's message, e.g. BinaryInUse.
      */
     removeDownload(name: string, bytes: number): Promise<BinariesRemoveResult | null>;
+    /** Where the OpenAI key comes from (ADR 0050); never the key itself. */
+    keyState(): Promise<OpenAiKeyState>;
+    /**
+     * Encrypt and keep the OpenAI key typed in the Plugins view, then hand it to the daemon. Rejects when this
+     * computer cannot encrypt it or it is malformed; the message never holds the key.
+     */
+    saveKey(key: string): Promise<OpenAiKeyState>;
+    /** Forget the saved OpenAI key, in the app and the daemon. */
+    removeKey(): Promise<OpenAiKeyState>;
   };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
@@ -828,10 +837,12 @@ export interface FrameshellApi {
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
     /**
-     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. Resolves with
-     * whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when another app owns it.
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. `origin` is the
+     * renderer's `performance.timeOrigin`, so main can put the screen's start on the clock of its pointer track.
+     * Resolves with whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when
+     * another app owns it.
      */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<boolean>;
+    started(id: string, starts: Partial<Record<ShootRole, number>>, origin?: number): Promise<boolean>;
     /** Called when the global End shortcut is pressed while this window records. Returns an unsubscribe function. */
     onEndRequested(listener: () => void): () => void;
     /** Append one recorded chunk of `role` to its file, in call order per role. */
@@ -1046,6 +1057,15 @@ export interface PluginsView {
   catalog: MethodResult<"plugin.catalog">;
   /** As `plugin.list` reports them, official or not. */
   declared: PluginInfo[];
+}
+
+/**
+ * Where the OpenAI key comes from (ADR 0050): the environment (wins), the key saved in this app, or nowhere.
+ * `storable` is false when this computer cannot encrypt a key, so the view offers no field.
+ */
+export interface OpenAiKeyState {
+  source: "environment" | "app" | "none";
+  storable: boolean;
 }
 
 /** Managed downloads of this machine as `doctor` reports them: on disk (`downloads`) and every tool (`binaries`). */
@@ -1311,6 +1331,9 @@ export const Channel = {
   pluginsTrust: "plugins:trust",
   pluginsDownloads: "plugins:downloads",
   pluginsRemoveDownload: "plugins:remove-download",
+  pluginsKeyState: "plugins:key-state",
+  pluginsSaveKey: "plugins:save-key",
+  pluginsRemoveKey: "plugins:remove-key",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",

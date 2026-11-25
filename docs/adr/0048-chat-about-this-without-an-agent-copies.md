@@ -14,7 +14,7 @@ Changes one sentence of ADR 0025 decision 3 and the fallback in ADR 0012. The ow
 
 ## Decision
 
-1. **No agent anywhere: the clipboard.** When no app terminal runs a detected agent and no external target is registered, "Chat about this" puts the reference on the clipboard, shows the terminal panel (its agent guide is where one starts) and says in the status bar: "No agent is running: the reference is on the clipboard. Start one in the terminal, then paste it." It is never typed at a shell prompt.
+1. **No agent anywhere: the clipboard.** When no app terminal runs a detected agent and no external target is registered, "Chat about this" puts the reference on the clipboard, shows the terminal panel (its agent guide is where one starts) and says in the status bar: "No agent is running: the reference is on the clipboard. Start one in the terminal, then paste it." It is never typed at a shell prompt. *Amended 2026-11-21 (#791):* when the terminal panel is folded, Connect your AI opens instead of the terminal, with "No AI is connected yet: the reference is on the clipboard. Connect your AI, then paste it in its chat.", so someone who does not code is not handed a shell.
 2. **An agent terminal still gets it typed**, unsent, as ADR 0012 says; external targets still get it in their inbox (ADR 0025 decision 4).
 3. **Windows reads the process table.** There the agent is the first command under the terminal's shell that names one (`descendantCommands`), read every 2 s from one long-lived PowerShell (`WindowsProcessTable`: one `Win32_Process` query per poll for every terminal, stopped after 15 s without one).
 4. **An agent Frameshell does not recognise** is named with `FRAMESHELL_AGENT_COMMANDS` (`name=label`), as before; otherwise the person pastes.

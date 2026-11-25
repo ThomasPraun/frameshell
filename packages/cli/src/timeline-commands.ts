@@ -1,6 +1,8 @@
 import type {
   CaptionsSetResult,
   ClipReframeResult,
+  ClipTextFitResult,
+  ClipZoomResult,
   ClipVerifyResult,
   CleanupResult,
   ConfigOperation,
@@ -85,6 +87,15 @@ mutations print the new revision):
                                --format with a format id of the project other than the primary (format list) writes
                                the framing into the clip's override there only; the clip and the other formats keep
                                theirs. An aspect (9:16 always is one) frames the clip itself, for every format
+  clip zoom <clip> --follow pointer [--scale 1.1-4] [--pointer <file>]
+                               Zoom a screen recording to where the action is: pushes in where the mouse pointer
+                               rests (0.8 s or more in one spot) and eases back out when it moves on, from the
+                               pointer track Shoot records next to each screen file. Rests close together share one
+                               zoom that glides between them; quick moves never zoom. --scale is the zoom factor
+                               over the clip's own scale (default 1.8); --pointer reads another track of the same
+                               shape. Writes scale, x and y keys (replacing the clip's own), one transaction,
+                               revert undoes it. Correct the keys with clip key or in the app. A Shoot screen
+                               shot: its screen file is placed over it (muted, new track Screen zoom), then zoomed
   clip verify <clip> [--probes n] [--tolerance 0-255]
                                Check that a generated clip (a motion clip, any adapter with a live preview) paints
                                a pure function of time: captures --probes frames (default 12, 2 to 48) at
@@ -93,6 +104,15 @@ mutations print the new revision):
                                the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
                                naming the worst frame, pixel and element. Also warns when every probe is the same
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
+  clip text-fit <clip> [--props json] [--at s,s,...]
+                               Check that every line of text of a generated clip fits its box and the frame:
+                               opens its live page at the project resolution, seeks to --at (composition seconds,
+                               1 to 12; default 50, 70 and 90 percent of the clip, once the words have settled)
+                               and measures each visible element with text of its own. Text past the frame edge is
+                               outside; text past the box that holds it (a button, a fixed-width line) overflows.
+                               --props tries props over the clip's own for the check only (another language:
+                               --props '{"cta":"Pruébalo hoy"}'); nothing is written or rendered. Exit 1 when
+                               something does not fit. Words drawn on a canvas or in SVG are not measured
   grade analyze <clip> [--at s | --from s --to s] [--samples n]
                                Measure the clip's source picture (before its own grade) with ffmpeg signalstats and
                                suggest a bounded correction: exposure, white balance, contrast, saturation, in the
@@ -430,6 +450,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
   tx commit | tx abort         Keep, or undo, the open transaction's changes. Abort undoes every timeline or,
                                on any conflict, none (listing every conflict)
   history [--since <tx>]       Operations grouped by transaction; --since: only what came after <tx>
+  history sound <tx|op>        Per track, where its sound changed and by how many dB, right before vs right after
   revert <tx|op>               Undo a transaction or one operation, as a new operation
 `;
 
@@ -578,6 +599,8 @@ export const TIMELINE_OPTIONS = {
   "tile-width": { type: "string" },
   person: { type: "string" },
   anchor: { type: "string" },
+  follow: { type: "string" },
+  pointer: { type: "string" },
   pauses: { type: "string" },
   "no-pauses": { type: "boolean" },
   breath: { type: "string" },
@@ -641,7 +664,9 @@ const ALLOWED: Record<string, string[]> = {
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
+  "clip zoom": ["follow", "scale", "pointer"],
   "clip verify": ["probes", "tolerance"],
+  "clip text-fit": ["props", "at"],
   "grade analyze": ["at", "from", "to", "samples"],
   "grade looks": [],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
@@ -761,7 +786,9 @@ const ARITY: Record<string, [number, number]> = {
   "letterbox set": [1, 1],
   "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
+  "clip zoom": [1, 1],
   "clip verify": [1, 1],
+  "clip text-fit": [1, 1],
   "grade analyze": [1, 1],
   "grade looks": [0, 0],
   "grade compare": [1, 1],
@@ -790,7 +817,7 @@ const ARITY: Record<string, [number, number]> = {
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
-  "history ": [0, 0],
+  "history ": [0, 2],
   "revert ": [1, 1],
 };
 
@@ -1442,6 +1469,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
       Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
       break;
+    case "clip zoom": {
+      method = "clip.zoom";
+      const follow = str("follow");
+      if (follow !== "pointer") throw new UsageError("--follow: expected pointer (the mouse pointer Shoot recorded with the screen).");
+      const scale = num("scale");
+      if (scale !== undefined && (scale < 1.1 || scale > 4)) throw new UsageError("--scale: expected a factor from 1.1 to 4.");
+      Object.assign(params, { clip: args[0], follow, scale, pointer: str("pointer") });
+      break;
+    }
     case "clip verify": {
       method = "clip.verify";
       const probes = num("probes");
@@ -1449,6 +1485,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       const tolerance = num("tolerance");
       if (tolerance !== undefined && (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255)) throw new UsageError("--tolerance: expected a whole number from 0 to 255.");
       Object.assign(params, { clip: args[0], probes, tolerance });
+      break;
+    }
+    case "clip text-fit": {
+      method = "clip.textFit";
+      const at = list("at")?.flatMap((raw) => raw.split(",")).map((raw) => {
+        const value = Number(raw);
+        if (raw.trim() === "" || !Number.isFinite(value) || value < 0) throw new UsageError(`--at: expected composition seconds such as 2.5,3; got "${raw}".`);
+        return value;
+      });
+      if (at !== undefined && (at.length < 1 || at.length > 12)) throw new UsageError(`--at: 1 to 12 times, got ${at.length}.`);
+      Object.assign(params, { clip: args[0], props: json("props"), at });
       break;
     }
     case "grade analyze": {
@@ -1613,6 +1660,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     }
     case "history ":
+      if (args[0] === "sound") {
+        if (args.length !== 2) throw new UsageError("`frameshell history sound` takes one argument: the transaction or operation id.");
+        if (values["since"] !== undefined) throw new UsageError("`frameshell history sound` does not take --since.");
+        method = "history.sound";
+        params["target"] = args[1];
+        break;
+      }
+      if (args.length > 0) throw new UsageError(`\`frameshell history\` takes no argument, got "${args[0]}" (\`history sound <tx|op>\` compares the sound around one).`);
       method = "history";
       params["since"] = str("since");
       break;
@@ -1668,12 +1723,13 @@ export async function executeTimeline(
     // Compact on purpose: agents read this, and indentation roughly doubles its tokens.
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
   }
-  if (inv.method === "clip.verify" && !(result as ClipVerifyResult).ok && exit) exit.code = 1;
+  if ((inv.method === "clip.verify" || inv.method === "clip.textFit") && !(result as { ok: boolean }).ok && exit) exit.code = 1;
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
   if (inv.method === "tempo.show") return formatTempo(result as MethodResult<"tempo.show">);
   if (inv.method === "history") return formatHistory(result as HistoryResult);
+  if (inv.method === "history.sound") return formatHistorySound(result as MethodResult<"history.sound">);
   if (inv.method === "tx.begin") {
     const { tx, label } = result as MethodResult<"tx.begin">;
     return `Began ${tx} "${label}"\n`;
@@ -1711,7 +1767,9 @@ export async function executeTimeline(
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "clip.zoom") return formatClipZoom(result as ClipZoomResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
+  if (inv.method === "clip.textFit") return formatClipTextFit(result as ClipTextFitResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "grade.looks") return formatGradeLooks(result as GradeLooksResult);
   if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
@@ -1744,6 +1802,23 @@ export function formatClipVerify(result: ClipVerifyResult): string {
   if (!result.ok) {
     lines.push("The picture depends on the order frames are painted. Look for CSS transitions, timers, requestAnimationFrame, Date, unseeded random, will-change or 3D transforms on that element.");
   }
+  return `${lines.join("\n")}\n`;
+}
+
+/** `clip text-fit` for people: the verdict, then one line per problem, worst first. */
+export function formatClipTextFit(result: ClipTextFitResult): string {
+  const tried = result.tried.length > 0 ? ` · trying ${result.tried.join(", ")}` : "";
+  const lines = [
+    `${result.ok ? "OK" : "FAIL"} · ${result.type} clip ${result.clip} of ${result.timeline} · ${result.lines} text element${result.lines === 1 ? "" : "s"} at ` +
+      `${result.size.width}x${result.size.height}, ${result.at.join(" ")} s${tried}` +
+      (result.ok ? "" : ` · ${result.problems.length} do${result.problems.length === 1 ? "es" : ""} not fit`),
+  ];
+  for (const problem of result.problems) {
+    const what = problem.kind === "outside" ? "past the frame" : "past its box";
+    lines.push(`  ${problem.selector} "${problem.text}" ${what} by ${problem.by} px on the ${problem.side} at ${problem.at.toFixed(3)} s`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (!result.ok) lines.push("Shorten the text, or give the clip a smaller size or a wider box for it (its props, or clip set --elements).");
   return `${lines.join("\n")}\n`;
 }
 
@@ -1969,6 +2044,15 @@ function formatClipReframe(result: ClipReframeResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatClipZoom(result: ClipZoomResult): string {
+  const rests = `${result.rests} rest${result.rests === 1 ? "" : "s"} of the pointer`;
+  const zooms = result.zooms > 0 ? `: ${result.zooms} zoom${result.zooms === 1 ? "" : "s"} at ${result.scale}x, ${result.keys} keys on scale, x and y` : "";
+  const lines = [`Zoom ${result.clip} from ${result.pointer}, ${rests}${zooms}`];
+  lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
 function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
@@ -2153,4 +2237,21 @@ function formatTimeline(view: TimelineView): string {
     if (override.letterbox) lines.push(`Letterbox in ${id}: ${Number(override.letterbox.aspect.toFixed(4))}:1`);
   }
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
+}
+
+/** `history sound`: one line per changed range, tracks in id order, then what did not change or could not be read. */
+function formatHistorySound(result: MethodResult<"history.sound">): string {
+  const lines: string[] = [];
+  if (result.tracks.length === 0) lines.push(`${result.target} changed no sound on ${result.timeline}.`);
+  for (const track of result.tracks) {
+    lines.push(`${track.name} (${track.track})`);
+    for (const range of track.ranges) {
+      const what = range.kind === "added" ? "sound added" : range.kind === "removed" ? "sound removed" : `${range.change > 0 ? "+" : ""}${range.change} dB`;
+      lines.push(`  ${range.from}-${range.to} s  ${what} (largest ${range.largest > 0 ? "+" : ""}${range.largest} dB)`);
+    }
+    if (track.more > 0) lines.push(`  …and ${track.more} more`);
+  }
+  if (result.unchanged.length > 0) lines.push(`Unchanged: ${result.unchanged.join(", ")}`);
+  if (result.unheard.length > 0) lines.push(`Not decoded, not compared: ${result.unheard.join(", ")}`);
+  return `${lines.join("\n")}\n`;
 }

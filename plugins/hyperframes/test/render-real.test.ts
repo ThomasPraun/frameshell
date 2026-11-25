@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import type { RenderProgress } from "@frameshell/plugin-api";
 import { createHyperframesAdapter, newComposition } from "../src/index.js";
+import { TEST_CHROME_ARGS } from "./chrome-args.js";
 
 // Opt-in: renders a scaffolded composition for real (in-process producer, managed ffmpeg and headless Chrome,
 // ~100 MB Chrome download on first run, kept under .cache/test-binaries). Run with
@@ -93,6 +94,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("real Hy
         { id: "left", type: "color", label: "Left", default: "#ff0000" },
         { id: "right", type: "color", label: "Right", default: "#ff0000" },
       ];
+      writeFileSync(join(project, "frameshell.json"), JSON.stringify({ resolution: { width: 160, height: 90 } }));
       writeFileSync(
         join(dir, "index.html"),
         `<!doctype html>
@@ -225,7 +227,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("real Hy
         );
       });
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const browser = await puppeteer.launch({ executablePath: chrome });
+      const browser = await puppeteer.launch({ executablePath: chrome, args: [...TEST_CHROME_ARGS] });
       try {
         const page = await browser.newPage();
         await page.setViewport({ width: 320, height: 180 });

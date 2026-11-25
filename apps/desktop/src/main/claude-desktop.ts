@@ -35,9 +35,10 @@ const isDir = (dir: string) =>
 
 /**
  * Where the installed Claude Desktop reads `claude_desktop_config.json` (#735). On Windows the Microsoft Store and
- * MSIX builds run packaged: their `%APPDATA%` is redirected to `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming`,
- * which an unpackaged app such as Frameshell does not see through `%APPDATA%`. A package whose `Claude` settings folder
- * exists wins, then the plain `%APPDATA%\Claude` when it exists, then any Claude package, then
+ * MSIX builds run packaged. Recent ones (6.28899, 2026-11) keep their data in `%LOCALAPPDATA%\Claude-Data\claude_<id>`;
+ * earlier ones had `%APPDATA%` redirected to `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming`. An unpackaged
+ * app such as Frameshell sees neither through `%APPDATA%`. A `Claude-Data` folder wins, then a package whose `Claude`
+ * settings folder exists, then the plain `%APPDATA%\Claude` when it exists, then any Claude package, then
  * {@link claudeDesktopConfigPath}. macOS and Linux are {@link claudeDesktopConfigPath}.
  */
 export async function claudeDesktopConfigFile(
@@ -49,7 +50,14 @@ export async function claudeDesktopConfigFile(
 ): Promise<string | undefined> {
   const plain = claudeDesktopConfigPath(platform, home, env);
   if (platform !== "win32" || !plain) return plain;
-  const packages = win32.join(env["LOCALAPPDATA"] ?? win32.join(home, "AppData", "Local"), "Packages");
+  const local = env["LOCALAPPDATA"] ?? win32.join(home, "AppData", "Local");
+  const dataRoot = win32.join(local, "Claude-Data");
+  const data = (await list(dataRoot)).filter((name) => /^claude_[a-z0-9]+$/i.test(name)).sort();
+  for (const name of data) {
+    const dir = win32.join(dataRoot, name);
+    if (await exists(dir)) return win32.join(dir, "claude_desktop_config.json");
+  }
+  const packages = win32.join(local, "Packages");
   const packaged = (await list(packages))
     .filter((name) => /^Claude_[a-z0-9]+$/i.test(name))
     .sort()

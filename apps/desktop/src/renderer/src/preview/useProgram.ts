@@ -1,8 +1,22 @@
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
-import { type FormatEntry, FormatEntrySchema, type ResolvedFormat, formatOf, formatProblems, formatTimeline, projectFormats } from "@frameshell/schema/formats";
+import {
+  type FormatEntry,
+  FormatEntrySchema,
+  type ResolvedFormat,
+  formatOf,
+  formatProblems,
+  formatTimeline,
+  projectFormats,
+} from "@frameshell/schema/formats";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { withSolo } from "../audition/model.js";
+import { useMixSolo } from "../audition/mix-solo.js";
 import { SELECTION_TIMELINE } from "../selection.js";
-import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
+import {
+  timelineState,
+  useTimelineView,
+  watchTimeline,
+} from "../timeline/useTimelineView.js";
 import { type Program, compileProgram } from "./program.js";
 import { useAudioBakes } from "./useAudioBakes.js";
 import { useClipRenders } from "./useClipRenders.js";
@@ -20,7 +34,8 @@ const NESTED_SOURCE = /^timelines\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
  * the shared timeline feeds (one read per change for every panel; nested
  * timelines on their own feeds) and `asset.list`, re-read on each revision
  * and while proxies are being built. Null until both are known. `format`: the project format shown (ADR 0027), absent
- * for the primary: its layout, the clips with their overrides there, and its generated-clip renders.
+ * for the primary: its layout, the clips with their overrides there, and its generated-clip renders. While the Audition
+ * dialog plays a music candidate in the mix, that candidate's solo applies (`audition/mix-solo.ts`).
  */
 export function useProgram(format?: ResolvedFormat): Program | null {
   const { view: stored } = useTimelineView(SELECTION_TIMELINE);
@@ -31,9 +46,29 @@ export function useProgram(format?: ResolvedFormat): Program | null {
   const bakes = useAudioBakes(stored, storedNested);
   const mattes = useSubjectMattes(stored, storedNested, assets);
   const grades = useGradeTables(stored, storedNested);
-  const { view, nested } = useMemo(() => viewsInFormat(stored, storedNested, format?.id), [stored, storedNested, format?.id]);
+  const solo = useMixSolo();
+  const { view: formatted, nested } = useMemo(
+    () => viewsInFormat(stored, storedNested, format?.id),
+    [stored, storedNested, format?.id],
+  );
+  // "Play in the mix" (#803): one music candidate plays, the others are silent, in the preview only.
+  const view = useMemo(
+    () => (formatted ? withSolo(formatted, solo) : formatted),
+    [formatted, solo],
+  );
   return useMemo(
-    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes, grades, ...(format ? { format } : {}) }) : null),
+    () =>
+      view && assets
+        ? compileProgram(view, assets, {
+            resolution,
+            nested,
+            renders,
+            bakes,
+            mattes,
+            grades,
+            ...(format ? { format } : {}),
+          })
+        : null,
     [view, assets, resolution, nested, renders, bakes, mattes, grades, format],
   );
 }
@@ -48,7 +83,12 @@ export function viewsInFormat(
   id: string | undefined,
 ): { view: TimelineView | null; nested: ReadonlyMap<string, TimelineView> } {
   if (id === undefined || !view) return { view, nested };
-  return { view: formatTimeline(view, id), nested: new Map([...nested].map(([source, inner]) => [source, formatTimeline(inner, id)])) };
+  return {
+    view: formatTimeline(view, id),
+    nested: new Map(
+      [...nested].map(([source, inner]) => [source, formatTimeline(inner, id)]),
+    ),
+  };
 }
 
 /**
@@ -56,7 +96,9 @@ export function viewsInFormat(
  * timelines, by clip `source`, followed live on the shared feeds. A source
  * not read yet (or unreadable) is absent: the preview shows a placeholder.
  */
-export function useNestedViews(root: TimelineView | null): ReadonlyMap<string, TimelineView> {
+export function useNestedViews(
+  root: TimelineView | null,
+): ReadonlyMap<string, TimelineView> {
   const [version, setVersion] = useState(0);
   const watched = useRef(new Map<string, () => void>());
   const reachable = useMemo(() => {
@@ -79,13 +121,22 @@ export function useNestedViews(root: TimelineView | null): ReadonlyMap<string, T
   }, [root, version]);
 
   useEffect(() => {
-    const ids = new Set([...reachable.keys()].flatMap((source) => NESTED_SOURCE.exec(source)?.[1] ?? []));
+    const ids = new Set(
+      [...reachable.keys()].flatMap(
+        (source) => NESTED_SOURCE.exec(source)?.[1] ?? [],
+      ),
+    );
     for (const [id, stop] of watched.current) {
       if (ids.has(id)) continue;
       stop();
       watched.current.delete(id);
     }
-    for (const id of ids) if (!watched.current.has(id)) watched.current.set(id, watchTimeline(id, () => setVersion((n) => n + 1)));
+    for (const id of ids)
+      if (!watched.current.has(id))
+        watched.current.set(
+          id,
+          watchTimeline(id, () => setVersion((n) => n + 1)),
+        );
   }, [reachable]);
 
   useEffect(() => {
@@ -104,8 +155,13 @@ export function useNestedViews(root: TimelineView | null): ReadonlyMap<string, T
 }
 
 /** `asset.list` of the project, re-read on each timeline `revision` and while proxies are being built; null until known. */
-export function useAssets(revision: number | null): ReadonlyMap<string, AssetInfo> | null {
-  const [assets, setAssets] = useState<{ key: string; map: ReadonlyMap<string, AssetInfo> } | null>(null);
+export function useAssets(
+  revision: number | null,
+): ReadonlyMap<string, AssetInfo> | null {
+  const [assets, setAssets] = useState<{
+    key: string;
+    map: ReadonlyMap<string, AssetInfo>;
+  } | null>(null);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
@@ -118,9 +174,23 @@ export function useAssets(revision: number | null): ReadonlyMap<string, AssetInf
       }
       if (disposed) return;
       // Same list, same map: the program is not recompiled (nor re-sent to the engine).
-      const key = JSON.stringify(list.map((a) => [a.path, a.hash, a.state, a.proxy, a.sidecar?.path ?? null, a.media?.video ?? null]));
-      setAssets((current) => (current?.key === key ? current : { key, map: new Map(list.map((a) => [a.path, a])) }));
-      if (list.some((a) => a.state === "pending" || a.state === "processing")) timer = setTimeout(() => void poll(), INGEST_POLL_MS);
+      const key = JSON.stringify(
+        list.map((a) => [
+          a.path,
+          a.hash,
+          a.state,
+          a.proxy,
+          a.sidecar?.path ?? null,
+          a.media?.video ?? null,
+        ]),
+      );
+      setAssets((current) =>
+        current?.key === key
+          ? current
+          : { key, map: new Map(list.map((a) => [a.path, a])) },
+      );
+      if (list.some((a) => a.state === "pending" || a.state === "processing"))
+        timer = setTimeout(() => void poll(), INGEST_POLL_MS);
     };
     void poll();
     return () => {
@@ -142,7 +212,10 @@ interface ProjectConfigView {
   formats?: FormatEntry[];
 }
 
-const DEFAULT_CONFIG: ProjectConfigView = { resolution: { width: 1920, height: 1080 }, kind: "video" };
+const DEFAULT_CONFIG: ProjectConfigView = {
+  resolution: { width: 1920, height: 1080 },
+  kind: "video",
+};
 
 /**
  * `resolution`, `kind` and `formats` of `frameshell.json`, followed live; the defaults
@@ -154,22 +227,51 @@ function useProjectConfig(): ProjectConfigView {
     let disposed = false;
     const read = async () => {
       try {
-        const raw = JSON.parse(await window.frameshell.files.read("frameshell.json")) as {
+        const raw = JSON.parse(
+          await window.frameshell.files.read("frameshell.json"),
+        ) as {
           resolution?: { width?: unknown; height?: unknown };
           kind?: unknown;
           formats?: unknown;
         };
         if (disposed) return;
         const { width, height } = raw.resolution ?? {};
-        const sized = typeof width === "number" && typeof height === "number" && width > 0 && height > 0;
+        const sized =
+          typeof width === "number" &&
+          typeof height === "number" &&
+          width > 0 &&
+          height > 0;
         const kind: ProjectKind = raw.kind === "image" ? "image" : "video";
         setConfig((current) => {
-          const resolution = sized && (current.resolution.width !== width || current.resolution.height !== height) ? { width, height } : current.resolution;
-          const parsed = raw.formats === undefined ? undefined : FormatEntrySchema.array().safeParse(raw.formats);
-          const listed = parsed === undefined ? undefined : parsed.success ? parsed.data : null;
-          const bad = listed === null || formatProblems({ kind, resolution, formats: listed }).length > 0;
-          const formats = bad || JSON.stringify(listed) === JSON.stringify(current.formats) ? current.formats : (listed ?? undefined);
-          if (resolution === current.resolution && kind === current.kind && formats === current.formats) return current;
+          const resolution =
+            sized &&
+            (current.resolution.width !== width ||
+              current.resolution.height !== height)
+              ? { width, height }
+              : current.resolution;
+          const parsed =
+            raw.formats === undefined
+              ? undefined
+              : FormatEntrySchema.array().safeParse(raw.formats);
+          const listed =
+            parsed === undefined
+              ? undefined
+              : parsed.success
+                ? parsed.data
+                : null;
+          const bad =
+            listed === null ||
+            formatProblems({ kind, resolution, formats: listed }).length > 0;
+          const formats =
+            bad || JSON.stringify(listed) === JSON.stringify(current.formats)
+              ? current.formats
+              : (listed ?? undefined);
+          if (
+            resolution === current.resolution &&
+            kind === current.kind &&
+            formats === current.formats
+          )
+            return current;
           return { resolution, kind, ...(formats ? { formats } : {}) };
         });
       } catch {
@@ -204,5 +306,8 @@ export function useProjectKind(): ProjectKind {
  */
 export function useProjectFormats(): ResolvedFormat[] {
   const config = useProjectConfig();
-  return useMemo(() => projectFormats(config).map((format) => formatOf(config, format.id)!), [config]);
+  return useMemo(
+    () => projectFormats(config).map((format) => formatOf(config, format.id)!),
+    [config],
+  );
 }

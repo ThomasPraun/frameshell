@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,10 +60,18 @@ describe("frameshell review", () => {
   it(
     "writes the sheets asked for and prints where they are",
     () => {
-      const result = frameshell(["review", "--sheets", "contact,seam", "--range", "0.2,0.8"]);
+      // The card by default (#801): the verdict and the layers, with the folder.
+      const card = frameshell(["review", "--sheets", "contact,seam", "--range", "0.2,0.8"]);
+      expect(card.code, card.stderr).toBe(0);
+      expect(card.stdout).toMatch(/^# Review 1 of timeline main\n\n0.2 to 0.8 s, 1920x1080 at 30 fps\. Read this card first/);
+      expect(card.stdout).toContain("- `review.json`: the sheets with every tile's time");
+      expect(card.stdout).toContain("`contact.png`");
+      expect(card.stdout).toContain(`Folder: ${join(project, ".frameshell", "review", "1")} (--full prints every sheet path and number)`);
+      expect(readFileSync(join(project, ".frameshell", "review", "1", "card.md"), "utf8")).toBe(card.stdout.slice(0, card.stdout.indexOf("\nFolder: ")));
+      const result = frameshell(["review", "--sheets", "contact,seam", "--range", "0.2,0.8", "--full"]);
       expect(result.code, result.stderr).toBe(0);
-      const dir = join(project, ".frameshell", "review", "1");
-      expect(result.stdout).toContain(`Review 1 of timeline main: 0.2 to 0.8 s, 1920x1080 at 30 fps -> ${dir}`);
+      const dir = join(project, ".frameshell", "review", "2");
+      expect(result.stdout).toContain(`Review 2 of timeline main: 0.2 to 0.8 s, 1920x1080 at 30 fps -> ${dir}`);
       expect(result.stdout).toContain(`${join(dir, "contact.png")}  `);
       expect(result.stdout).toContain(`${join(dir, "seam.png")}  `);
       expect(existsSync(join(dir, "contact.png"))).toBe(true);
@@ -78,7 +86,7 @@ describe("frameshell review", () => {
       const result = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "phone", "--json"]);
       expect(result.code, result.stderr).toBe(0);
       const review = JSON.parse(result.stdout) as { source: string; file: string; run: number; sheets: { kind: string; tiles: unknown[] }[] };
-      expect(review).toMatchObject({ source: "file", file: join(project, "assets", "take.mp4"), run: 2 });
+      expect(review).toMatchObject({ source: "file", file: join(project, "assets", "take.mp4"), run: 3 });
       expect(review.sheets).toMatchObject([{ kind: "phone", tiles: [{ at: 0 }] }]);
     },
     120_000,
@@ -87,7 +95,7 @@ describe("frameshell review", () => {
   it(
     "draws the zones of --platform (an alias works) and prints them",
     () => {
-      const result = frameshell(["review", "--platform", "instagram", "--sheets", "safe", "--range", "0,0.5"]);
+      const result = frameshell(["review", "--platform", "instagram", "--sheets", "safe", "--range", "0,0.5", "--full"]);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("safe-instagram-reels.png");
       // The test project is 16:9: the vertical platform's numbers are scaled per axis, with a warning.
@@ -102,7 +110,7 @@ describe("frameshell review", () => {
   it(
     "prints the metrics and the loudness of a file, writes metrics.json, and metrics alone write no sheets",
     () => {
-      const result = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics"]);
+      const result = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics", "--full"]);
       expect(result.code, result.stderr).toBe(0);
       // A file is measured on every frame.
       expect(result.stdout).toMatch(/Metrics \(30 frames, [\d.]+ s apart\): longest still /);
@@ -119,11 +127,11 @@ describe("frameshell review", () => {
   it(
     "prints the loop seam and, with --preset, the delivery check of a file against its export plan",
     () => {
-      const seam = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics", "--loop"]);
+      const seam = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics", "--loop", "--full"]);
       expect(seam.code, seam.stderr).toBe(0);
       expect(seam.stdout).toMatch(/loop seam: the last frame \([\d.]+ s\) differs from the first by [\d.]+ of 255 \((continuous|cut|duplicate)\)/);
       // The clip is 320x240: against the 1080p plan of the project every size check fails.
-      const delivery = frameshell(["review", "--file", "assets/take.mp4", "--preset", "youtube-1080p", "--sheets", "metrics"]);
+      const delivery = frameshell(["review", "--file", "assets/take.mp4", "--preset", "youtube-1080p", "--sheets", "metrics", "--full"]);
       expect(delivery.code, delivery.stderr).toBe(0);
       expect(delivery.stdout).toContain("delivery against main with youtube-1080p (16x9): differs");
       expect(delivery.stdout).toContain("BAD width: 320 (plan 1920)");
@@ -140,13 +148,13 @@ describe("frameshell review", () => {
       const path = join(project, "requirements.json");
       try {
         writeFileSync(path, JSON.stringify({ schemaVersion: 1, film: { maxSeconds: 0.5, minSeconds: 0.5 } }));
-        const failed = frameshell(["review", "--sheets", "metrics"]);
+        const failed = frameshell(["review", "--sheets", "metrics", "--full"]);
         expect(failed.code, failed.stderr).toBe(1);
         expect(failed.stdout).toContain("requirements.json: 1 failed, 1 of 2 checks pass");
         expect(failed.stdout).toContain("FAIL film.maxSeconds: the film runs 1 s, over the 0.5 s the project allows.");
         // A craft check that fails when listed, then waived with a reason: reported, not failing.
         writeFileSync(path, JSON.stringify({ schemaVersion: 1, fail: ["frame-0", "static"], waivers: [{ check: "frame-0", reason: "fades in" }, { check: "static", reason: "x" }] }));
-        const waived = frameshell(["review", "--sheets", "metrics"]);
+        const waived = frameshell(["review", "--sheets", "metrics", "--full"]);
         expect(waived.code, waived.stderr).toBe(0);
         expect(waived.stdout).toContain("requirements.json: met, 0 of 0 checks pass");
         expect(waived.stdout).toContain("unused waiver of static: x");
@@ -186,7 +194,7 @@ describe("frameshell review", () => {
     () => {
       const shown = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { kind: string; clips: { id: string }[] }[] };
       const clip = shown.tracks.find((track) => track.kind === "video")!.clips[0]!.id;
-      const result = frameshell(["review", "--pop", "0.5", "--speed", clip]);
+      const result = frameshell(["review", "--pop", "0.5", "--speed", clip, "--full"]);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toMatch(/pop\.png\s+\d+x\d+\s+pop, 3 tiles/);
       expect(result.stdout).toMatch(/speed\.png\s+\d+x\d+\s+speed, 1 tiles/);

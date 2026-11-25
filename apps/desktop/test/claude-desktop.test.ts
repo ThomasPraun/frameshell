@@ -43,6 +43,15 @@ describe("claudeDesktopConfigFile (#735)", () => {
   const fake = (dirs: Record<string, string[]>, existing: string[]) =>
     [async (dir: string) => dirs[dir] ?? [], async (dir: string) => existing.includes(dir)] as const;
 
+  it("uses Claude-Data of a recent Store build first, even with the older redirected folder beside it", async () => {
+    const data = "C:\\Users\\ana\\AppData\\Local\\Claude-Data";
+    const [list, exists] = fake(
+      { [data]: ["README.txt", "claude_pzs8sxrjxfjjc"], [packages]: ["Claude_pzs8sxrjxfjjc"] },
+      [`${data}\\claude_pzs8sxrjxfjjc`, store, plain],
+    );
+    expect(await claudeDesktopConfigFile("win32", home, env, list, exists)).toBe(`${data}\\claude_pzs8sxrjxfjjc\\claude_desktop_config.json`);
+  });
+
   it("uses the Microsoft Store build's redirected settings folder, which %APPDATA% does not show", async () => {
     const [list, exists] = fake({ [packages]: ["Microsoft.Photos_8wekyb3d8bbwe", "Claude_pzs8sxrjxfjjc"] }, [store]);
     expect(await claudeDesktopConfigFile("win32", home, env, list, exists)).toBe(`${store}\\claude_desktop_config.json`);
